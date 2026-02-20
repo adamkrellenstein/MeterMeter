@@ -1,0 +1,34 @@
+[
+    {
+        "caption": "Poetry Meter: Toggle Live Annotation",
+        "command": "poetry_meter_toggle_live"
+    },
+    {
+        "caption": "Poetry Meter: Rescan Buffer",
+        "command": "poetry_meter_rescan_buffer"
+    },
+    {
+        "caption": "Poetry Meter: Clear Annotations",
+        "command": "poetry_meter_clear_annotations"
+    },
+    {
+        "caption": "Poetry Meter: Clear LLM Cache",
+        "command": "poetry_meter_clear_llm_cache"
+    },
+    {
+        "caption": "Poetry Meter: Setup Local LLM",
+        "command": "poetry_meter_setup_local_llm"
+    },
+    {
+        "caption": "Poetry Meter: Bootstrap Local LLM",
+        "command": "poetry_meter_bootstrap_local_llm"
+    },
+    {
+        "caption": "Poetry Meter: Restart LLM Sidecar",
+        "command": "poetry_meter_restart_llm_sidecar"
+    },
+    {
+        "caption": "Poetry Meter: Stop LLM Sidecar",
+        "command": "poetry_meter_stop_llm_sidecar"
+    }
+]
