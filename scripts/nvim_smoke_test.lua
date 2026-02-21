@@ -64,8 +64,8 @@ local function run_poem_engine_only()
   local bufnr = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_name(bufnr, "/tmp/poetrymeter_smoke.poem")
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
-    "The trampled fruit yields wine that's sweet and red.",
-    "And plants will dream, thy flax to fit a nuptial bed.",
+    "The trampled fruit yields wine that's sweet and red. \\",
+    "And plants will dream, thy flax to fit a nuptial bed. \\",
   })
 
   poetrymeter.enable(bufnr)
@@ -86,29 +86,22 @@ local function run_poem_engine_only()
   end
 end
 
-local function run_typst_opt_in()
+local function run_backslash_gate()
   poetrymeter.setup({
     enabled_by_default = false,
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = false },
-    enabled_file_extensions = { ".poem" },
-    opt_in_file_extensions = { ".typ" },
-    opt_in_marker = "poetrymeter: on",
-    typst_only_backslash_lines = true,
   })
 
   vim.cmd("enew")
   local bufnr = vim.api.nvim_get_current_buf()
-  vim.api.nvim_buf_set_name(bufnr, "/tmp/poetrymeter_smoke.typ")
+  vim.api.nvim_buf_set_name(bufnr, "/tmp/poetrymeter_smoke_gate.poem")
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
-    "// poetrymeter: on",
-    '#import "style/template.typ": poem, stanza, couplet',
-    "",
-    "#stanza[",
-    "  Such trampled fruit yields wine that's sweet and red; \\",
-    "  This last line has no continuation.",
-    "]",
+    "This line should be ignored.",
+    "This line should be annotated. \\",
+    "Another ignored line.",
+    "Another annotated line. \\",
   })
 
   poetrymeter.enable(bufnr)
@@ -116,26 +109,21 @@ local function run_typst_opt_in()
     return #extmarks(bufnr) > 0
   end, 4000)
   if not ok then
-    fail("typst opt-in: no extmarks created")
+    fail("backslash gate: no extmarks created")
   end
 
   local marks = extmarks(bufnr)
   for _, m in ipairs(marks) do
     local row = m[2]
-    -- Should not annotate the marker/import lines (0..2). Poem content is row 4.
-    if row < 3 then
-      fail("typst opt-in: annotated outside stanza block (row=" .. tostring(row) .. ")")
-    end
-    -- With typst_only_backslash_lines, only the continuation line should be annotated (row 4).
-    if row == 5 then
-      fail("typst opt-in: annotated non-continuation line")
+    if row == 0 or row == 2 then
+      fail("backslash gate: annotated a non-\\\\ line (row=" .. tostring(row) .. ")")
     end
   end
 end
 
 local function main()
   run_poem_engine_only()
-  run_typst_opt_in()
+  run_backslash_gate()
   vim.cmd("qa!")
 end
 

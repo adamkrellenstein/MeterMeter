@@ -61,10 +61,6 @@ set termguicolors
 ## File Enable Rules
 
 - `.poem`: enabled by default
-- `.typ`: opt-in per file by adding a marker near the top:
 
-```text
-// poetrymeter: on
-```
-
-For `.typ`, only lines inside `#stanza[ ... ]`, `#couplet[ ... ]`, or `#poem[ ... ]` blocks are annotated.
+PoetryMeter only annotates lines that explicitly end with a trailing backslash (`\`). This keeps it from
+annotating non-poetic / structural lines in mixed-format files.

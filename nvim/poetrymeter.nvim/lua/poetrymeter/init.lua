@@ -7,10 +7,6 @@ local ns = vim.api.nvim_create_namespace("poetrymeter")
 local DEFAULTS = {
   enabled_by_default = true,
   enabled_file_extensions = { ".poem" },
-  opt_in_file_extensions = { ".typ" },
-  opt_in_marker = "poetrymeter: on",
-  opt_out_marker = "poetrymeter: off",
-  marker_scan_max_lines = 25,
 
   max_line_length = 220,
   debounce_ms = 80,
@@ -20,12 +16,6 @@ local DEFAULTS = {
   highlight_stress = true,
   stress_style = "bold", -- "bold" | "bg"
   show_eol = true,
-
-  -- Typst filtering: when a buffer looks like Typst, only annotate inside stanza/couplet/poem
-  -- blocks. If typst_only_backslash_lines is true, only annotate lines that end in a trailing
-  -- "\" (Typst line continuation).
-  typst_only_backslash_lines = true,
-  typst_detection_max_lines = 60,
 
   -- LLM refinement (optional).
   llm = {
@@ -81,60 +71,6 @@ local function buf_ext(bufnr)
   return name:sub(dot)
 end
 
-local function looks_like_typst(bufnr)
-  local ft = (vim.bo[bufnr] and vim.bo[bufnr].filetype) or ""
-  if type(ft) == "string" and ft:lower() == "typst" then
-    return true
-  end
-
-  local max_lines = tonumber(cfg.typst_detection_max_lines) or 0
-  if max_lines <= 0 then
-    return false
-  end
-
-  local n = vim.api.nvim_buf_line_count(bufnr)
-  local limit = math.min(n, max_lines)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, limit, false)
-  for _, line in ipairs(lines) do
-    local low = vim.trim(line):lower()
-    if low:find("#stanza[", 1, true) or low:find("#couplet[", 1, true) or low:find("#poem[", 1, true) then
-      return true
-    end
-    if low:find("#import", 1, true) or low:find("#show:", 1, true) then
-      return true
-    end
-    if low:find(".typ", 1, true) and low:find("#import", 1, true) then
-      return true
-    end
-  end
-  return false
-end
-
-local function read_marker_state(bufnr)
-  local max_lines = tonumber(cfg.marker_scan_max_lines) or 0
-  if max_lines <= 0 then
-    return nil
-  end
-  local opt_in = tostring(cfg.opt_in_marker or ""):lower()
-  local opt_out = tostring(cfg.opt_out_marker or ""):lower()
-  if opt_in == "" and opt_out == "" then
-    return nil
-  end
-  local line_count = vim.api.nvim_buf_line_count(bufnr)
-  local limit = math.min(line_count, max_lines)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, limit, false)
-  for _, line in ipairs(lines) do
-    local low = vim.trim(line):lower()
-    if opt_out ~= "" and low:find(opt_out, 1, true) then
-      return false
-    end
-    if opt_in ~= "" and low:find(opt_in, 1, true) then
-      return true
-    end
-  end
-  return nil
-end
-
 local function should_enable(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return false
@@ -145,17 +81,8 @@ local function should_enable(bufnr)
 
   local ext = buf_ext(bufnr)
   local enabled_exts = norm_exts(cfg.enabled_file_extensions)
-  local opt_in_exts = norm_exts(cfg.opt_in_file_extensions)
-
-  local marker = read_marker_state(bufnr)
-  if marker == false then
-    return false
-  end
 
   if enabled_exts[ext] then
-    return true
-  end
-  if opt_in_exts[ext] and marker == true then
     return true
   end
 
@@ -205,46 +132,10 @@ local function compute_stress_hl()
   vim.api.nvim_set_hl(0, "PoetryMeterEOL", { link = "Comment" })
 end
 
-local function typst_allowed_lines_upto(lines, max_row)
-  -- lines: 0-based Lua array (list) from 0..max_row inclusive (strings)
-  local allowed = {}
-  local in_block = false
-  local depth = 0
-  local starters = { "#stanza[", "#couplet[", "#poem[" }
-
-  for row = 0, max_row do
-    local raw = lines[row + 1] or ""
-    local stripped = vim.trim(raw)
-    local low = stripped:lower()
-
-    if not in_block then
-      for _, st in ipairs(starters) do
-        if low:sub(1, #st) == st then
-          in_block = true
-          local delta = select(2, raw:gsub("%[", "")) - select(2, raw:gsub("%]", ""))
-          depth = (delta > 0) and delta or 1
-          break
-        end
-      end
-    else
-      local delta = select(2, raw:gsub("%[", "")) - select(2, raw:gsub("%]", ""))
-      depth = depth + delta
-      if depth <= 0 then
-        in_block = false
-        depth = 0
-      else
-        if stripped ~= "" and stripped:sub(1, 1) ~= "#" and stripped:sub(1, 1) ~= "]" then
-          if stripped:sub(1, 1) ~= "{" and stripped:sub(1, 1) ~= "}" then
-            if not cfg.typst_only_backslash_lines or stripped:match("\\%s*$") then
-              allowed[row] = true
-            end
-          end
-        end
-      end
-    end
-  end
-
-  return allowed
+local function is_poetry_line(text)
+  -- KISS: only annotate lines explicitly marked by a trailing backslash.
+  local s = vim.trim(text or "")
+  return s ~= "" and s:match("\\$") ~= nil
 end
 
 local function candidate_line_set_for_buf(bufnr)
@@ -373,13 +264,6 @@ local function build_request(bufnr, line_set)
   local max_len = tonumber(cfg.max_line_length) or 220
 
   local line_count = vim.api.nvim_buf_line_count(bufnr)
-  local max_row = line_count - 1
-
-  local allowed_typst = nil
-  if looks_like_typst(bufnr) then
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, line_count, false)
-    allowed_typst = typst_allowed_lines_upto(lines, max_row)
-  end
 
   local lines = {}
   local st = ensure_state(bufnr)
@@ -388,7 +272,7 @@ local function build_request(bufnr, line_set)
     if lnum >= 0 and lnum < line_count then
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
       local ok = true
-      if allowed_typst and not allowed_typst[lnum] then
+      if ok and not is_poetry_line(text) then
         ok = false
       end
       if ok and (#text == 0 or #text > max_len) then
@@ -430,10 +314,12 @@ local function merge_cache_and_results(bufnr, resp)
   for lnum, _ in pairs(line_set) do
     if lnum >= 0 and lnum < line_count then
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
-      local key = cfg.llm.model .. "\n" .. tostring(cfg.llm.endpoint or "") .. "\n" .. text
-      local cached = st.cache[key]
-      if cached then
-        table.insert(out, cached)
+      if is_poetry_line(text) then
+        local key = cfg.llm.model .. "\n" .. tostring(cfg.llm.endpoint or "") .. "\n" .. text
+        local cached = st.cache[key]
+        if cached then
+          table.insert(out, cached)
+        end
       end
     end
   end

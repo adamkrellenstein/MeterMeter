@@ -1,0 +1,40 @@
+import json
+import os
+import sys
+import unittest
+
+
+def _nvim_python_path() -> str:
+    here = os.path.dirname(__file__)
+    return os.path.join(here, "..", "nvim", "poetrymeter.nvim", "python")
+
+
+sys.path.insert(0, os.path.abspath(_nvim_python_path()))
+
+import poetrymeter_cli  # noqa: E402
+from poetrymeter.meter_engine import MeterEngine  # noqa: E402
+
+
+class NvimStressSpanTests(unittest.TestCase):
+    def test_multisyllable_token_span_is_not_whole_word(self) -> None:
+        # 'pollen' is 2 syllables; we should highlight only the stressed nucleus (vowel group),
+        # not the entire token.
+        line = "as pollen crowds \\"
+        engine = MeterEngine()
+        a = engine.analyze_line(line, line_no=0)
+        self.assertIsNotNone(a)
+        spans = poetrymeter_cli._stress_spans_for_line(a.source_text, a.token_patterns)
+        self.assertTrue(spans, "expected at least one stress span")
+
+        token_start = line.find("pollen")
+        self.assertGreaterEqual(token_start, 0)
+        token_end = token_start + len("pollen")
+
+        # Convert token [char] range to byte range for comparison.
+        b_start = len(line[:token_start].encode("utf-8"))
+        b_end = len(line[:token_end].encode("utf-8"))
+
+        # Ensure no span covers the entire token.
+        for s, e in spans:
+            self.assertFalse(s <= b_start and e >= b_end, (s, e, b_start, b_end))
+

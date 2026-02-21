@@ -72,7 +72,15 @@ def _stress_spans_for_line(text: str, token_patterns: List[str]) -> List[List[in
             continue
         m = matches[i]
         token = m.group(0)
-        syl_spans = _syllable_spans(token, len(pat))
+
+        # Prefer highlighting the vowel nuclei for each syllable (more visible than trying to
+        # guess full syllable boundaries). If vowel-group count mismatches, fall back.
+        groups = list(VOWEL_GROUP_RE.finditer(token))
+        if len(groups) == len(pat):
+            syl_spans = [(g.start(), g.end()) for g in groups]
+        else:
+            syl_spans = _syllable_spans(token, len(pat))
+
         for syl_idx, flag in enumerate(pat):
             if flag != "S":
                 continue
@@ -167,4 +175,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
