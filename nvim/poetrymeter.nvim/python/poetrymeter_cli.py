@@ -84,9 +84,9 @@ def _stress_spans_for_line(text: str, token_patterns: List[str]) -> List[List[in
                 groups = groups[:-1]
 
         if pat_len == 1 and groups:
-            # For 1-syllable tokens, show the primary nucleus (first vowel group) rather than
-            # bolding the whole word.
-            syl_spans = [(groups[0].start(), groups[0].end())]
+            # For 1-syllable tokens, highlight from the vowel nucleus to the end of the token.
+            # This is usually what readers perceive as the stressed "chunk" (e.g. mIGHT, glANCE).
+            syl_spans = [(groups[0].start(), len(token))]
         elif len(groups) == pat_len and groups:
             syl_spans = [(g.start(), g.end()) for g in groups]
         else:

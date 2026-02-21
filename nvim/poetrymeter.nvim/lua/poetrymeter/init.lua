@@ -285,6 +285,32 @@ local function apply_results(bufnr, results)
   if not results then
     return
   end
+  -- Align meter hints at a consistent column (left-aligned), based on the widest annotated line.
+  local max_w = 0
+  for _, item in ipairs(results) do
+    if type(item) == "table" and type(item.text) == "string" then
+      local w = vim.fn.strdisplaywidth(item.text)
+      if type(w) == "number" and w > max_w then
+        max_w = w
+      end
+    end
+  end
+  local eol_col = max_w + 1
+  local wins = vim.fn.win_findbuf(bufnr)
+  if type(wins) == "table" then
+    for _, win in ipairs(wins) do
+      win = tonumber(win) or win
+      if type(win) == "number" and vim.api.nvim_win_is_valid(win) then
+        local ww = vim.api.nvim_win_get_width(win)
+        if type(ww) == "number" and ww > 1 then
+          -- Clamp to avoid placing completely offscreen.
+          eol_col = math.min(eol_col, ww - 1)
+        end
+        break
+      end
+    end
+  end
+
   for _, item in ipairs(results) do
     local lnum = tonumber(item.lnum)
     if lnum and vim.api.nvim_buf_is_valid(bufnr) then
@@ -303,8 +329,9 @@ local function apply_results(bufnr, results)
         local hl = eol_hl_for_conf(conf)
         vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, 0, {
           virt_text = { { " " .. label, hl } },
-          -- Align meter hints without relying on tabs/spaces.
-          virt_text_pos = "right_align",
+          -- Left-aligned, but starting in a consistent column across all annotated lines.
+          virt_text_pos = "overlay",
+          virt_text_win_col = eol_col,
         })
       end
       if cfg.highlight_stress and type(item.stress_spans) == "table" then
