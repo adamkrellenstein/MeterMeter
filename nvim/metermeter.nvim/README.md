@@ -67,5 +67,14 @@ MeterMeter enables itself when `&filetype` includes `metermeter`.
 vim: set ft=typst.metermeter :
 ```
 
-MeterMeter only annotates lines that explicitly end with a trailing backslash (`\`). This keeps it from
-annotating non-poetic / structural lines in mixed-format files.
+By default, MeterMeter annotates every non-comment line.
+
+If you want an explicit "poetry line marker" for mixed-format files, set:
+
+```lua
+require("metermeter").setup({ require_trailing_backslash = true })
+```
+
+Then MeterMeter will only annotate lines that end with a trailing backslash (`\`).
+
+Comment lines are ignored using the buffer's native `&comments` / `&commentstring`.

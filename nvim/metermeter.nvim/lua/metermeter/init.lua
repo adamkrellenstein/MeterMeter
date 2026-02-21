@@ -17,6 +17,10 @@ local DEFAULTS = {
   show_eol = true,
   eol_confidence_levels = 6, -- number of discrete tints for EOL meter annotation (>= 2)
 
+  -- If true, only annotate lines that end with a trailing "\" (useful for mixed-format files).
+  -- If false (default), annotate every non-comment line.
+  require_trailing_backslash = false,
+
   -- LLM refinement (optional).
   llm = {
     enabled = true,
@@ -190,10 +194,90 @@ local function eol_hl_for_conf(conf)
   return "MeterMeterEOL" .. tostring(idx)
 end
 
-local function is_poetry_line(text)
-  -- KISS: only annotate lines explicitly marked by a trailing backslash.
+local function _split_csv(s)
+  if type(s) ~= "string" or s == "" then
+    return {}
+  end
+  local out = {}
+  for part in string.gmatch(s, "([^,]+)") do
+    table.insert(out, vim.trim(part))
+  end
+  return out
+end
+
+local function _comment_leaders(bufnr)
+  local leaders = {}
+  local seen = {}
+
+  local comments = (vim.bo[bufnr] and vim.bo[bufnr].comments) or ""
+  for _, entry in ipairs(_split_csv(comments)) do
+    if entry ~= "" then
+      local leader = entry
+      local colon = string.find(entry, ":", 1, true)
+      if colon then
+        leader = entry:sub(colon + 1)
+      end
+      leader = leader or ""
+      leader = leader:gsub("\\,", ",") -- best-effort
+      leader = leader:gsub("\\\\", "\\")
+      leader = vim.trim(leader)
+      if leader ~= "" and not seen[leader] then
+        seen[leader] = true
+        table.insert(leaders, leader)
+      end
+    end
+  end
+
+  local cs = (vim.bo[bufnr] and vim.bo[bufnr].commentstring) or ""
+  if type(cs) == "string" and cs:find("%%s", 1, true) then
+    local prefix = cs:match("^(.-)%%s")
+    if prefix then
+      prefix = vim.trim(prefix)
+      if prefix ~= "" and not seen[prefix] then
+        seen[prefix] = true
+        table.insert(leaders, prefix)
+      end
+    end
+  end
+
+  -- Prefer longer leaders first (e.g. "///" before "//").
+  table.sort(leaders, function(a, b)
+    return #a > #b
+  end)
+
+  return leaders
+end
+
+local function is_comment_line(bufnr, text)
+  local s = text or ""
+  s = s:gsub("^%s+", "")
+  if s == "" then
+    return false
+  end
+  for _, leader in ipairs(_comment_leaders(bufnr)) do
+    if leader ~= "" then
+      local l = leader
+      local l2 = leader:gsub("%s+$", "")
+      if s:sub(1, #l) == l or (l2 ~= "" and s:sub(1, #l2) == l2) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+local function is_scan_line(bufnr, text)
   local s = vim.trim(text or "")
-  return s ~= "" and s:match("\\$") ~= nil
+  if s == "" then
+    return false
+  end
+  if is_comment_line(bufnr, s) then
+    return false
+  end
+  if cfg.require_trailing_backslash then
+    return s:match("\\$") ~= nil
+  end
+  return true
 end
 
 local function candidate_line_set_for_buf(bufnr)
@@ -359,7 +443,7 @@ local function build_request(bufnr, line_set)
     if lnum >= 0 and lnum < line_count then
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
       local ok = true
-      if ok and not is_poetry_line(text) then
+      if ok and not is_scan_line(bufnr, text) then
         ok = false
       end
       if ok and (#text == 0 or #text > max_len) then
@@ -401,7 +485,7 @@ local function merge_cache_and_results(bufnr, resp)
   for lnum, _ in pairs(line_set) do
     if lnum >= 0 and lnum < line_count then
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
-      if is_poetry_line(text) then
+      if is_scan_line(bufnr, text) then
         local key = cfg.llm.model .. "\n" .. tostring(cfg.llm.endpoint or "") .. "\n" .. text
         local cached = st.cache[key]
         if cached then

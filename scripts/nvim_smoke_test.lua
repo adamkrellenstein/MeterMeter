@@ -58,6 +58,7 @@ local function run_poem_engine_only()
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = false },
+    require_trailing_backslash = false,
   })
 
   vim.cmd("enew")
@@ -65,8 +66,8 @@ local function run_poem_engine_only()
   vim.api.nvim_buf_set_name(bufnr, "/tmp/metermeter_smoke.poem")
   vim.bo[bufnr].filetype = "metermeter"
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
-    "The trampled fruit yields wine that's sweet and red. \\",
-    "And plants will dream, thy flax to fit a nuptial bed. \\",
+    "The trampled fruit yields wine that's sweet and red.",
+    "And plants will dream, thy flax to fit a nuptial bed.",
   })
 
   metermeter.enable(bufnr)
@@ -93,6 +94,7 @@ local function run_backslash_gate()
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = false },
+    require_trailing_backslash = true,
   })
 
   vim.cmd("enew")
@@ -123,9 +125,50 @@ local function run_backslash_gate()
   end
 end
 
+local function run_comment_ignore()
+  metermeter.setup({
+    enabled_by_default = false,
+    rescan_interval_ms = 0,
+    debounce_ms = 1,
+    llm = { enabled = false },
+    require_trailing_backslash = false,
+  })
+
+  vim.cmd("enew")
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_name(bufnr, "/tmp/metermeter_smoke_comments.poem")
+  vim.bo[bufnr].filetype = "metermeter"
+  -- Provide "native" comment hints via options (as filetypes normally do).
+  vim.bo[bufnr].comments = "://,b:#"
+  vim.bo[bufnr].commentstring = "// %s"
+
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+    "// comment should be ignored",
+    "# comment should be ignored",
+    "This line should be annotated.",
+  })
+
+  metermeter.enable(bufnr)
+  local ok = wait_for(function()
+    return #extmarks(bufnr) > 0
+  end, 4000)
+  if not ok then
+    fail("comment ignore: no extmarks created")
+  end
+
+  local marks = extmarks(bufnr)
+  for _, m in ipairs(marks) do
+    local row = m[2]
+    if row == 0 or row == 1 then
+      fail("comment ignore: annotated a comment line (row=" .. tostring(row) .. ")")
+    end
+  end
+end
+
 local function main()
   run_poem_engine_only()
   run_backslash_gate()
+  run_comment_ignore()
   vim.cmd("qa!")
 end
 
