@@ -16,7 +16,7 @@ Use this repo, but point `dir` to the plugin subfolder:
 
 ```lua
 {
-  dir = "~/dev/PoetryMeter/nvim/metermeter.nvim",
+  dir = "~/dev/MeterMeter/nvim/metermeter.nvim",
   config = function()
     require("metermeter").setup({
       llm = {
@@ -35,7 +35,7 @@ Use this repo, but point `dir` to the plugin subfolder:
 Add this to your `init.vim` between `plug#begin(...)` and `plug#end()`:
 
 ```vim
-Plug '~/dev/PoetryMeter/nvim/metermeter.nvim'
+Plug '~/dev/MeterMeter/nvim/metermeter.nvim'
 ```
 
 Then restart Neovim and run:
