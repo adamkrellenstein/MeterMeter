@@ -2,7 +2,9 @@
 
 Local, real-time poetic meter annotation for Neovim.
 
-This is a Neovim-oriented implementation of the same core idea as the Sublime Text package in this repo.
+This is a Neovim-first implementation focused on real-time scansion and meter hints.
+
+Scanning is progressive and incremental: visible lines are annotated first, nearby prefetch lines next, then remaining scanable lines across the buffer. Cached results are reused for unchanged lines, and LLM refinements patch in after baseline engine results.
 
 ## Requirements
 
@@ -91,7 +93,7 @@ require("metermeter").setup({ ... })
 |---|---:|---|---|
 | `debounce_ms` | `80` | Delay after edits before rescanning. | Avoids rescanning on every keystroke burst. |
 | `rescan_interval_ms` | `1000` | Periodic background rescan interval; `0` disables timer. | Keeps annotations fresh during navigation/scroll without edits. |
-| `prefetch_lines` | `80` | Also scans lines around cursor, not only currently visible lines. | Reduces “pop-in” when moving through large buffers. |
+| `prefetch_lines` | `5` | Also scans lines around cursor, not only currently visible lines. | Keeps nearby context warm without delaying visible-line feedback. |
 | `ui.stress` | `true` | Enables stress span highlighting. | Allows turning off visual emphasis if user only wants meter labels. |
 | `ui.meter_hints` | `true` | Shows meter annotations at line end. | Supports a cleaner “highlights only” mode when false. |
 | `ui.meter_hint_confidence_levels` | `6` | Number of confidence tint steps for EOL meter text. | Balances subtle confidence signaling vs. visual noise. |
