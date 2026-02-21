@@ -18,6 +18,7 @@ local DEFAULTS = {
   prefetch_lines = 80, -- also scan around cursor, not only visible lines
 
   highlight_stress = true,
+  stress_style = "bold", -- "bold" | "bg"
   show_eol = true,
 
   -- LLM refinement (optional).
@@ -127,43 +128,45 @@ local function should_enable(bufnr)
 end
 
 local function compute_stress_hl()
-  -- A subtle background distinct from Normal.
-  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false }) or {}
-  local bg = normal.bg or normal.background
-  if type(bg) ~= "number" then
-    -- Terminal / no-rgb fallback: use a subtle cterm background based on &background.
-    local dark = (vim.o.background or ""):lower() ~= "light"
-    vim.api.nvim_set_hl(0, "PoetryMeterStress", { ctermbg = dark and 236 or 252 })
-    vim.api.nvim_set_hl(0, "PoetryMeterEOL", { link = "Comment" })
-    return
-  end
-  local r = math.floor(bg / 65536) % 256
-  local g = math.floor(bg / 256) % 256
-  local b = bg % 256
-  local function clamp(x)
-    if x < 0 then
-      return 0
+  if (cfg.stress_style or "bold") == "bg" then
+    -- A subtle background distinct from Normal.
+    local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false }) or {}
+    local bg = normal.bg or normal.background
+    if type(bg) ~= "number" then
+      local dark = (vim.o.background or ""):lower() ~= "light"
+      vim.api.nvim_set_hl(0, "PoetryMeterStress", { ctermbg = dark and 236 or 252 })
+      vim.api.nvim_set_hl(0, "PoetryMeterEOL", { link = "Comment" })
+      return
     end
-    if x > 255 then
-      return 255
+    local r = math.floor(bg / 65536) % 256
+    local g = math.floor(bg / 256) % 256
+    local b = bg % 256
+    local function clamp(x)
+      if x < 0 then
+        return 0
+      end
+      if x > 255 then
+        return 255
+      end
+      return x
     end
-    return x
-  end
-  -- If background is very dark (common for terminals), darkening becomes invisible.
-  -- Lighten on dark themes, darken on light themes.
-  local luma = (r * 0.2126) + (g * 0.7152) + (b * 0.0722)
-  local delta = 22
-  if luma < 128 then
-    r = clamp(r + delta)
-    g = clamp(g + delta)
-    b = clamp(b + delta)
+    local luma = (r * 0.2126) + (g * 0.7152) + (b * 0.0722)
+    local delta = 22
+    if luma < 128 then
+      r = clamp(r + delta)
+      g = clamp(g + delta)
+      b = clamp(b + delta)
+    else
+      r = clamp(r - delta)
+      g = clamp(g - delta)
+      b = clamp(b - delta)
+    end
+    local new_bg = r * 65536 + g * 256 + b
+    vim.api.nvim_set_hl(0, "PoetryMeterStress", { bg = new_bg })
   else
-    r = clamp(r - delta)
-    g = clamp(g - delta)
-    b = clamp(b - delta)
+    -- Bold overlay so it stays visible even when Normal bg is pure black.
+    vim.api.nvim_set_hl(0, "PoetryMeterStress", { bold = true })
   end
-  local new_bg = r * 65536 + g * 256 + b
-  vim.api.nvim_set_hl(0, "PoetryMeterStress", { bg = new_bg })
   vim.api.nvim_set_hl(0, "PoetryMeterEOL", { link = "Comment" })
 end
 
@@ -316,6 +319,7 @@ local function apply_results(bufnr, results)
             vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, s, {
               end_col = e,
               hl_group = "PoetryMeterStress",
+              hl_mode = "combine",
             })
           end
         end
