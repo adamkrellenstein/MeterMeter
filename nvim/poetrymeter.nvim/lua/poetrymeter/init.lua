@@ -15,6 +15,7 @@ local DEFAULTS = {
   max_line_length = 220,
   debounce_ms = 80,
   rescan_interval_ms = 1000,
+  prefetch_lines = 80, -- also scan around cursor, not only visible lines
 
   highlight_stress = true,
   show_eol = true,
@@ -197,9 +198,12 @@ local function typst_allowed_lines_upto(lines, max_row)
   return allowed
 end
 
-local function visible_line_set_for_buf(bufnr)
+local function candidate_line_set_for_buf(bufnr)
   local wins = vim.fn.win_findbuf(bufnr)
   local out = {}
+  local prefetch = tonumber(cfg.prefetch_lines) or 0
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local max_row = math.max(0, line_count - 1)
   for _, win in ipairs(wins) do
     win = tonumber(win) or win
     if type(win) == "number" and vim.api.nvim_win_is_valid(win) then
@@ -214,6 +218,16 @@ local function visible_line_set_for_buf(bufnr)
       end
       for l = w0, w1 do
         out[l] = true
+      end
+
+      if prefetch > 0 then
+        local cur = vim.api.nvim_win_get_cursor(win)
+        local row = (cur and cur[1] and tonumber(cur[1]) or 1) - 1
+        local a = math.max(0, row - prefetch)
+        local b = math.min(max_row, row + prefetch)
+        for l = a, b do
+          out[l] = true
+        end
       end
     end
   end
@@ -362,7 +376,7 @@ local function merge_cache_and_results(bufnr, resp)
   end
   -- Return results for current visible lines from cache.
   local out = {}
-  local line_set = visible_line_set_for_buf(bufnr)
+  local line_set = candidate_line_set_for_buf(bufnr)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   for lnum, _ in pairs(line_set) do
     if lnum >= 0 and lnum < line_count then
@@ -384,16 +398,19 @@ local function run_cli(input, cb)
   local cmd = cli_cmd()
   local text = json_encode(input)
   vim.system(cmd, { stdin = text, text = true }, function(res)
-    if res.code ~= 0 then
-      cb(nil, "cli exited " .. tostring(res.code) .. ": " .. (res.stderr or ""))
-      return
-    end
-    local ok, obj = pcall(json_decode, res.stdout or "")
-    if not ok then
-      cb(nil, "bad json from cli: " .. tostring(obj))
-      return
-    end
-    cb(obj, nil)
+    -- vim.system callbacks run in a "fast event" context; bounce back to main loop.
+    vim.schedule(function()
+      if res.code ~= 0 then
+        cb(nil, "cli exited " .. tostring(res.code) .. ": " .. (res.stderr or ""))
+        return
+      end
+      local ok, obj = pcall(json_decode, res.stdout or "")
+      if not ok then
+        cb(nil, "bad json from cli: " .. tostring(obj))
+        return
+      end
+      cb(obj, nil)
+    end)
   end)
 end
 
@@ -409,7 +426,7 @@ local function do_scan(bufnr)
     return
   end
 
-  local line_set = visible_line_set_for_buf(bufnr)
+  local line_set = candidate_line_set_for_buf(bufnr)
   local req = build_request(bufnr, line_set)
   if #req.lines == 0 then
     -- Still render cached lines (e.g. after colorscheme change).
