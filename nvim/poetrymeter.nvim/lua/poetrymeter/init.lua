@@ -127,7 +127,7 @@ local function should_enable(bufnr)
 end
 
 local function compute_stress_hl()
-  -- A subtle background a bit darker than Normal.
+  -- A subtle background distinct from Normal.
   local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false }) or {}
   local bg = normal.bg or normal.background
   if type(bg) ~= "number" then
@@ -149,10 +149,19 @@ local function compute_stress_hl()
     end
     return x
   end
-  -- Darken slightly.
-  r = clamp(r - 14)
-  g = clamp(g - 14)
-  b = clamp(b - 14)
+  -- If background is very dark (common for terminals), darkening becomes invisible.
+  -- Lighten on dark themes, darken on light themes.
+  local luma = (r * 0.2126) + (g * 0.7152) + (b * 0.0722)
+  local delta = 22
+  if luma < 128 then
+    r = clamp(r + delta)
+    g = clamp(g + delta)
+    b = clamp(b + delta)
+  else
+    r = clamp(r - delta)
+    g = clamp(g - delta)
+    b = clamp(b - delta)
+  end
   local new_bg = r * 65536 + g * 256 + b
   vim.api.nvim_set_hl(0, "PoetryMeterStress", { bg = new_bg })
   vim.api.nvim_set_hl(0, "PoetryMeterEOL", { link = "Comment" })
