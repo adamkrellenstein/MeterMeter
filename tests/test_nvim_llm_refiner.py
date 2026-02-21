@@ -8,13 +8,13 @@ from unittest.mock import patch
 
 def _nvim_python_path() -> str:
     here = os.path.dirname(__file__)
-    return os.path.join(here, "..", "nvim", "poetrymeter.nvim", "python")
+    return os.path.join(here, "..", "nvim", "metermeter.nvim", "python")
 
 
 sys.path.insert(0, os.path.abspath(_nvim_python_path()))
 
-from poetrymeter.llm_refiner import LLMRefiner  # noqa: E402
-from poetrymeter.meter_engine import LineAnalysis  # noqa: E402
+from metermeter.llm_refiner import LLMRefiner  # noqa: E402
+from metermeter.meter_engine import LineAnalysis  # noqa: E402
 
 
 class _Resp:

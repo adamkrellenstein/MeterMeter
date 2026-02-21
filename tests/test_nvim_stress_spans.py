@@ -6,13 +6,13 @@ import unittest
 
 def _nvim_python_path() -> str:
     here = os.path.dirname(__file__)
-    return os.path.join(here, "..", "nvim", "poetrymeter.nvim", "python")
+    return os.path.join(here, "..", "nvim", "metermeter.nvim", "python")
 
 
 sys.path.insert(0, os.path.abspath(_nvim_python_path()))
 
-import poetrymeter_cli  # noqa: E402
-from poetrymeter.meter_engine import MeterEngine  # noqa: E402
+import metermeter_cli  # noqa: E402
+from metermeter.meter_engine import MeterEngine  # noqa: E402
 
 
 class NvimStressSpanTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class NvimStressSpanTests(unittest.TestCase):
         engine = MeterEngine()
         a = engine.analyze_line(line, line_no=0)
         self.assertIsNotNone(a)
-        spans = poetrymeter_cli._stress_spans_for_line(a.source_text, a.token_patterns)
+        spans = metermeter_cli._stress_spans_for_line(a.source_text, a.token_patterns)
         self.assertTrue(spans, "expected at least one stress span")
 
         token_start = line.find("pollen")
@@ -45,7 +45,7 @@ class NvimStressSpanTests(unittest.TestCase):
         engine = MeterEngine()
         a = engine.analyze_line(line, line_no=0)
         self.assertIsNotNone(a)
-        spans = poetrymeter_cli._stress_spans_for_line(a.source_text, a.token_patterns)
+        spans = metermeter_cli._stress_spans_for_line(a.source_text, a.token_patterns)
         self.assertTrue(spans, "expected at least one stress span")
 
         token = "glance"

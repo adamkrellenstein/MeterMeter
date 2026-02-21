@@ -2,11 +2,10 @@ local uv = vim.uv or vim.loop
 
 local M = {}
 
-local ns = vim.api.nvim_create_namespace("poetrymeter")
+local ns = vim.api.nvim_create_namespace("metermeter")
 
 local DEFAULTS = {
   enabled_by_default = true,
-  enabled_file_extensions = { ".poem" },
 
   max_line_length = 220,
   debounce_ms = 80,
@@ -29,10 +28,10 @@ local DEFAULTS = {
     hide_non_refined = false,
   },
 
-  -- Executable: { "python3", "<plugin_root>/python/poetrymeter_cli.py" }
+  -- Executable: { "python3", "<plugin_root>/python/metermeter_cli.py" }
   cli_cmd = nil,
 
-  debug_dump_path = "/tmp/poetrymeter_nvim_dump.json",
+  debug_dump_path = "/tmp/metermeter_nvim_dump.json",
 }
 
 local cfg = vim.deepcopy(DEFAULTS)
@@ -42,20 +41,7 @@ local state_by_buf = {}
 local function plugin_root()
   local src = debug.getinfo(1, "S").source
   local path = src:sub(2) -- drop leading "@"
-  return vim.fn.fnamemodify(path, ":p:h:h:h") -- .../lua/poetrymeter/init.lua -> plugin root
-end
-
-local function norm_exts(exts)
-  local out = {}
-  for _, ext in ipairs(exts or {}) do
-    if type(ext) == "string" and ext ~= "" then
-      if ext:sub(1, 1) ~= "." then
-        ext = "." .. ext
-      end
-      out[ext:lower()] = true
-    end
-  end
-  return out
+  return vim.fn.fnamemodify(path, ":p:h:h:h") -- .../lua/metermeter/init.lua -> plugin root
 end
 
 local function buf_path(bufnr)
@@ -63,13 +49,24 @@ local function buf_path(bufnr)
   return name or ""
 end
 
-local function buf_ext(bufnr)
-  local name = buf_path(bufnr):lower()
-  local dot = name:match("^.*()%.")
-  if not dot then
-    return ""
+local function has_ft_token(bufnr, token)
+  local ft = (vim.bo[bufnr] and vim.bo[bufnr].filetype) or ""
+  if type(ft) ~= "string" or ft == "" then
+    return false
   end
-  return name:sub(dot)
+  token = tostring(token or "")
+  if token == "" then
+    return false
+  end
+  if ft == token then
+    return true
+  end
+  for part in string.gmatch(ft, "[^%.]+") do
+    if part == token then
+      return true
+    end
+  end
+  return false
 end
 
 local function should_enable(bufnr)
@@ -80,14 +77,9 @@ local function should_enable(bufnr)
     return false
   end
 
-  local ext = buf_ext(bufnr)
-  local enabled_exts = norm_exts(cfg.enabled_file_extensions)
-
-  if enabled_exts[ext] then
-    return true
-  end
-
-  return false
+  -- Modeline-friendly: user can opt-in via filetype.
+  -- Example modeline: `vim: set ft=typst.metermeter :`
+  return has_ft_token(bufnr, "metermeter")
 end
 
 local function compute_stress_hl()
@@ -97,8 +89,8 @@ local function compute_stress_hl()
     local bg = normal.bg or normal.background
     if type(bg) ~= "number" then
       local dark = (vim.o.background or ""):lower() ~= "light"
-      vim.api.nvim_set_hl(0, "PoetryMeterStress", { ctermbg = dark and 236 or 252 })
-      vim.api.nvim_set_hl(0, "PoetryMeterEOL", { link = "Comment" })
+      vim.api.nvim_set_hl(0, "MeterMeterStress", { ctermbg = dark and 236 or 252 })
+      vim.api.nvim_set_hl(0, "MeterMeterEOL", { link = "Comment" })
       return
     end
     local r = math.floor(bg / 65536) % 256
@@ -125,12 +117,12 @@ local function compute_stress_hl()
       b = clamp(b - delta)
     end
     local new_bg = r * 65536 + g * 256 + b
-    vim.api.nvim_set_hl(0, "PoetryMeterStress", { bg = new_bg })
+    vim.api.nvim_set_hl(0, "MeterMeterStress", { bg = new_bg })
   else
     -- Bold overlay so it stays visible even when Normal bg is pure black.
-    vim.api.nvim_set_hl(0, "PoetryMeterStress", { bold = true })
+    vim.api.nvim_set_hl(0, "MeterMeterStress", { bold = true })
   end
-  vim.api.nvim_set_hl(0, "PoetryMeterEOL", { link = "Comment" })
+  vim.api.nvim_set_hl(0, "MeterMeterEOL", { link = "Comment" })
 end
 
 local function _blend_rgb(a, b, t)
@@ -170,7 +162,7 @@ local function compute_eol_hls()
       local t = i / (levels - 1)
       -- On dark themes, higher t => brighter; on light themes, higher t => darker.
       local c = dark and (240 + math.floor(t * 14 + 0.5)) or (252 - math.floor(t * 14 + 0.5))
-      vim.api.nvim_set_hl(0, "PoetryMeterEOL" .. tostring(i), { ctermfg = c })
+      vim.api.nvim_set_hl(0, "MeterMeterEOL" .. tostring(i), { ctermfg = c })
     end
     return
   end
@@ -178,7 +170,7 @@ local function compute_eol_hls()
   for i = 0, levels - 1 do
     local t = i / (levels - 1)
     local fg = _blend_rgb(cfgc, nfg, t)
-    vim.api.nvim_set_hl(0, "PoetryMeterEOL" .. tostring(i), { fg = fg })
+    vim.api.nvim_set_hl(0, "MeterMeterEOL" .. tostring(i), { fg = fg })
   end
 end
 
@@ -191,11 +183,11 @@ local function eol_hl_for_conf(conf)
     levels = 12
   end
   if type(conf) ~= "number" then
-    return "PoetryMeterEOL0"
+    return "MeterMeterEOL0"
   end
   conf = math.max(0, math.min(1, conf))
   local idx = math.floor(conf * (levels - 1) + 0.5)
-  return "PoetryMeterEOL" .. tostring(idx)
+  return "MeterMeterEOL" .. tostring(idx)
 end
 
 local function is_poetry_line(text)
@@ -276,7 +268,7 @@ local function cli_cmd()
     return cfg.cli_cmd
   end
   local root = plugin_root()
-  local script = root .. "/python/poetrymeter_cli.py"
+  local script = root .. "/python/metermeter_cli.py"
   return { "python3", script }
 end
 
@@ -341,7 +333,7 @@ local function apply_results(bufnr, results)
           if s and e and e > s then
             vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, s, {
               end_col = e,
-              hl_group = "PoetryMeterStress",
+              hl_group = "MeterMeterStress",
               hl_mode = "combine",
             })
           end
@@ -467,7 +459,7 @@ local function do_scan(bufnr)
 
   run_cli(req, function(resp, err)
     if err then
-      -- Keep stale annotations; user can :PoetryMeterDump to inspect.
+      -- Keep stale annotations; user can :MeterMeterDump to inspect.
       return
     end
     local results = merge_cache_and_results(bufnr, resp)
@@ -559,7 +551,7 @@ function M.dump_debug(bufnr)
     enabled = st.enabled,
     extmarks = marks,
   }
-  local path = cfg.debug_dump_path or "/tmp/poetrymeter_nvim_dump.json"
+  local path = cfg.debug_dump_path or "/tmp/metermeter_nvim_dump.json"
   local ok, enc = pcall(json_encode, out)
   if ok then
     local f = io.open(path, "w")
@@ -577,14 +569,14 @@ function M.setup(opts)
   compute_stress_hl()
   compute_eol_hls()
   vim.api.nvim_create_autocmd("ColorScheme", {
-    group = vim.api.nvim_create_augroup("PoetryMeterColors", { clear = true }),
+    group = vim.api.nvim_create_augroup("MeterMeterColors", { clear = true }),
     callback = function()
       compute_stress_hl()
       compute_eol_hls()
     end,
   })
 
-  local group = vim.api.nvim_create_augroup("PoetryMeter", { clear = true })
+  local group = vim.api.nvim_create_augroup("MeterMeter", { clear = true })
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile", "BufEnter" }, {
     group = group,
     callback = function(args)

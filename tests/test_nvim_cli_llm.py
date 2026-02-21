@@ -8,12 +8,12 @@ from unittest.mock import patch
 
 def _nvim_python_path() -> str:
     here = os.path.dirname(__file__)
-    return os.path.join(here, "..", "nvim", "poetrymeter.nvim", "python")
+    return os.path.join(here, "..", "nvim", "metermeter.nvim", "python")
 
 
 sys.path.insert(0, os.path.abspath(_nvim_python_path()))
 
-import poetrymeter_cli  # noqa: E402
+import metermeter_cli  # noqa: E402
 
 
 class _Resp:
@@ -70,7 +70,7 @@ class NvimCLILLMTests(unittest.TestCase):
         stdin = io.StringIO(json.dumps(req, ensure_ascii=True))
         stdout = io.StringIO()
         with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch("urllib.request.urlopen", return_value=_Resp(response)):
-            rc = poetrymeter_cli.main()
+            rc = metermeter_cli.main()
         self.assertEqual(rc, 0)
 
         out = json.loads(stdout.getvalue() or "{}")

@@ -5,8 +5,8 @@ import re
 import sys
 from typing import Dict, List, Optional, Tuple
 
-from poetrymeter.meter_engine import LineAnalysis, MeterEngine
-from poetrymeter.llm_refiner import LLMRefiner
+from metermeter.meter_engine import LineAnalysis, MeterEngine
+from metermeter.llm_refiner import LLMRefiner
 
 WORD_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 VOWEL_GROUP_RE = re.compile(r"[AEIOUYaeiouy]+")

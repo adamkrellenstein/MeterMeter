@@ -1,4 +1,4 @@
-# poetrymeter.nvim
+# metermeter.nvim
 
 Local, real-time poetic meter annotation for Neovim.
 
@@ -16,9 +16,9 @@ Use this repo, but point `dir` to the plugin subfolder:
 
 ```lua
 {
-  dir = "~/dev/PoetryMeter/nvim/poetrymeter.nvim",
+  dir = "~/dev/PoetryMeter/nvim/metermeter.nvim",
   config = function()
-    require("poetrymeter").setup({
+    require("metermeter").setup({
       llm = {
         enabled = true,
         endpoint = "http://127.0.0.1:11434/v1/chat/completions",
@@ -35,7 +35,7 @@ Use this repo, but point `dir` to the plugin subfolder:
 Add this to your `init.vim` between `plug#begin(...)` and `plug#end()`:
 
 ```vim
-Plug '~/dev/PoetryMeter/nvim/poetrymeter.nvim'
+Plug '~/dev/PoetryMeter/nvim/metermeter.nvim'
 ```
 
 Then restart Neovim and run:
@@ -52,15 +52,20 @@ set termguicolors
 
 ## Usage
 
-- `:PoetryMeterEnable`
-- `:PoetryMeterDisable`
-- `:PoetryMeterToggle`
-- `:PoetryMeterRescan`
-- `:PoetryMeterDump` (writes `/tmp/poetrymeter_nvim_dump.json`)
+- `:MeterMeterToggle`
+- `:MeterMeterRescan`
+- `:MeterMeterDump` (writes `/tmp/metermeter_nvim_dump.json`)
 
 ## File Enable Rules
 
-- `.poem`: enabled by default
+MeterMeter enables itself when `&filetype` includes `metermeter`.
 
-PoetryMeter only annotates lines that explicitly end with a trailing backslash (`\`). This keeps it from
+- `*.poem` is detected automatically via `ftdetect` (filetype becomes `metermeter`).
+- Mixed-format files can opt-in via a modeline, for example:
+
+```text
+vim: set ft=typst.metermeter :
+```
+
+MeterMeter only annotates lines that explicitly end with a trailing backslash (`\`). This keeps it from
 annotating non-poetic / structural lines in mixed-format files.
