@@ -30,6 +30,26 @@ Use this repo, but point `dir` to the plugin subfolder:
 }
 ```
 
+## Install (vim-plug)
+
+Add this to your `init.vim` between `plug#begin(...)` and `plug#end()`:
+
+```vim
+Plug '~/dev/PoetryMeter/nvim/poetrymeter.nvim'
+```
+
+Then restart Neovim and run:
+
+```vim
+:PlugInstall
+```
+
+Optional (recommended for nicer highlight colors):
+
+```vim
+set termguicolors
+```
+
 ## Usage
 
 - `:PoetryMeterEnable`
@@ -48,4 +68,3 @@ Use this repo, but point `dir` to the plugin subfolder:
 ```
 
 For `.typ`, only lines inside `#stanza[ ... ]`, `#couplet[ ... ]`, or `#poem[ ... ]` blocks are annotated.
-

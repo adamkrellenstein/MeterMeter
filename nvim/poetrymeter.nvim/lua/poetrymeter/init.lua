@@ -130,8 +130,9 @@ local function compute_stress_hl()
   local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false }) or {}
   local bg = normal.bg or normal.background
   if type(bg) ~= "number" then
-    -- Fallback: link to Visual, but most colorschemes define Normal bg anyway.
-    vim.api.nvim_set_hl(0, "PoetryMeterStress", { link = "Visual" })
+    -- Terminal / no-rgb fallback: use a subtle cterm background based on &background.
+    local dark = (vim.o.background or ""):lower() ~= "light"
+    vim.api.nvim_set_hl(0, "PoetryMeterStress", { ctermbg = dark and 236 or 252 })
     vim.api.nvim_set_hl(0, "PoetryMeterEOL", { link = "Comment" })
     return
   end
