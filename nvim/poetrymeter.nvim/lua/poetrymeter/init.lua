@@ -303,7 +303,8 @@ local function apply_results(bufnr, results)
         local hl = eol_hl_for_conf(conf)
         vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, 0, {
           virt_text = { { " " .. label, hl } },
-          virt_text_pos = "eol",
+          -- Align meter hints without relying on tabs/spaces.
+          virt_text_pos = "right_align",
         })
       end
       if cfg.highlight_stress and type(item.stress_spans) == "table" then
