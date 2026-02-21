@@ -5,17 +5,15 @@ local M = {}
 local ns = vim.api.nvim_create_namespace("metermeter")
 
 local DEFAULTS = {
-  enabled_by_default = true,
-
-  max_line_length = 220,
   debounce_ms = 80,
   rescan_interval_ms = 1000,
   prefetch_lines = 80, -- also scan around cursor, not only visible lines
 
-  highlight_stress = true,
-  stress_style = "bold", -- "bold" | "bg"
-  show_eol = true,
-  eol_confidence_levels = 6, -- number of discrete tints for EOL meter annotation (>= 2)
+  ui = {
+    stress = true,
+    meter_hints = true,
+    meter_hint_confidence_levels = 6, -- number of discrete tint steps (>= 2)
+  },
 
   -- If true, only annotate lines that end with a trailing "\" (useful for mixed-format files).
   -- If false (default), annotate every non-comment line.
@@ -31,9 +29,6 @@ local DEFAULTS = {
     max_lines_per_scan = 2,
     hide_non_refined = false,
   },
-
-  -- Executable: { "python3", "<plugin_root>/python/metermeter_cli.py" }
-  cli_cmd = nil,
 
   debug_dump_path = "/tmp/metermeter_nvim_dump.json",
 }
@@ -87,45 +82,8 @@ local function should_enable(bufnr)
 end
 
 local function compute_stress_hl()
-  if (cfg.stress_style or "bold") == "bg" then
-    -- A subtle background distinct from Normal.
-    local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false }) or {}
-    local bg = normal.bg or normal.background
-    if type(bg) ~= "number" then
-      local dark = (vim.o.background or ""):lower() ~= "light"
-      vim.api.nvim_set_hl(0, "MeterMeterStress", { ctermbg = dark and 236 or 252 })
-      vim.api.nvim_set_hl(0, "MeterMeterEOL", { link = "Comment" })
-      return
-    end
-    local r = math.floor(bg / 65536) % 256
-    local g = math.floor(bg / 256) % 256
-    local b = bg % 256
-    local function clamp(x)
-      if x < 0 then
-        return 0
-      end
-      if x > 255 then
-        return 255
-      end
-      return x
-    end
-    local luma = (r * 0.2126) + (g * 0.7152) + (b * 0.0722)
-    local delta = 22
-    if luma < 128 then
-      r = clamp(r + delta)
-      g = clamp(g + delta)
-      b = clamp(b + delta)
-    else
-      r = clamp(r - delta)
-      g = clamp(g - delta)
-      b = clamp(b - delta)
-    end
-    local new_bg = r * 65536 + g * 256 + b
-    vim.api.nvim_set_hl(0, "MeterMeterStress", { bg = new_bg })
-  else
-    -- Bold overlay so it stays visible even when Normal bg is pure black.
-    vim.api.nvim_set_hl(0, "MeterMeterStress", { bold = true })
-  end
+  -- Bold overlay so it stays visible even when Normal bg is pure black.
+  vim.api.nvim_set_hl(0, "MeterMeterStress", { bold = true })
   vim.api.nvim_set_hl(0, "MeterMeterEOL", { link = "Comment" })
 end
 
@@ -145,7 +103,7 @@ end
 
 local function compute_eol_hls()
   -- Confidence-driven meter hint: more confident => closer to Normal, less confident => closer to Comment.
-  local levels = tonumber(cfg.eol_confidence_levels) or 6
+  local levels = tonumber(cfg.ui.meter_hint_confidence_levels) or 6
   if levels < 2 then
     levels = 2
   end
@@ -179,7 +137,7 @@ local function compute_eol_hls()
 end
 
 local function eol_hl_for_conf(conf)
-  local levels = tonumber(cfg.eol_confidence_levels) or 6
+  local levels = tonumber(cfg.ui.meter_hint_confidence_levels) or 6
   if levels < 2 then
     levels = 2
   end
@@ -346,10 +304,7 @@ local function clear_buf(bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 end
 
-local function cli_cmd()
-  if cfg.cli_cmd then
-    return cfg.cli_cmd
-  end
+local function default_cli_cmd()
   local root = plugin_root()
   local script = root .. "/python/metermeter_cli.py"
   return { "python3", script }
@@ -400,7 +355,7 @@ local function apply_results(bufnr, results)
         label = ""
         hint = ""
       end
-      if cfg.show_eol and label ~= "" then
+      if cfg.ui.meter_hints and label ~= "" then
         local hl = eol_hl_for_conf(conf)
         vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, 0, {
           virt_text = { { " " .. label, hl } },
@@ -409,7 +364,7 @@ local function apply_results(bufnr, results)
           virt_text_win_col = eol_col,
         })
       end
-      if cfg.highlight_stress and type(item.stress_spans) == "table" then
+      if cfg.ui.stress and type(item.stress_spans) == "table" then
         for _, span in ipairs(item.stress_spans) do
           local s = tonumber(span[1])
           local e = tonumber(span[2])
@@ -431,8 +386,6 @@ local function apply_results(bufnr, results)
 end
 
 local function build_request(bufnr, line_set)
-  local max_len = tonumber(cfg.max_line_length) or 220
-
   local line_count = vim.api.nvim_buf_line_count(bufnr)
 
   local lines = {}
@@ -443,9 +396,6 @@ local function build_request(bufnr, line_set)
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
       local ok = true
       if ok and not is_scan_line(bufnr, text) then
-        ok = false
-      end
-      if ok and (#text == 0 or #text > max_len) then
         ok = false
       end
       local key = cfg.llm.model .. "\n" .. tostring(cfg.llm.endpoint or "") .. "\n" .. text
@@ -500,7 +450,7 @@ local function merge_cache_and_results(bufnr, resp)
 end
 
 local function run_cli(input, cb)
-  local cmd = cli_cmd()
+  local cmd = default_cli_cmd()
   local text = json_encode(input)
   vim.system(cmd, { stdin = text, text = true }, function(res)
     -- vim.system callbacks run in a "fast event" context; bounce back to main loop.
@@ -663,7 +613,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile", "BufEnter" }, {
     group = group,
     callback = function(args)
-      if should_enable(args.buf) and cfg.enabled_by_default then
+      if should_enable(args.buf) then
         M.enable(args.buf)
       end
     end,

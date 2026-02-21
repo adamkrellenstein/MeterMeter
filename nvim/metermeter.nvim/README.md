@@ -89,17 +89,13 @@ require("metermeter").setup({ ... })
 
 | Option | Default | What it does | Why it exists |
 |---|---:|---|---|
-| `enabled_by_default` | `true` | Auto-enables MeterMeter on matching buffers. | Lets users install once and get immediate behavior, while allowing opt-out workflows. |
-| `max_line_length` | `220` | Skips very long lines during scan. | Prevents expensive analysis on lines unlikely to be verse (or minified text). |
 | `debounce_ms` | `80` | Delay after edits before rescanning. | Avoids rescanning on every keystroke burst. |
 | `rescan_interval_ms` | `1000` | Periodic background rescan interval; `0` disables timer. | Keeps annotations fresh during navigation/scroll without edits. |
 | `prefetch_lines` | `80` | Also scans lines around cursor, not only currently visible lines. | Reduces “pop-in” when moving through large buffers. |
-| `highlight_stress` | `true` | Enables stress span highlighting. | Allows turning off visual emphasis if user only wants meter labels. |
-| `stress_style` | `"bold"` | Stress highlight style (`"bold"` or `"bg"`). | Different color schemes/renderers need different emphasis strategies. |
-| `show_eol` | `true` | Shows meter annotations at line end. | Supports a cleaner “highlights only” mode when false. |
-| `eol_confidence_levels` | `6` | Number of confidence tint steps for EOL meter text. | Balances subtle confidence signaling vs. visual noise. |
+| `ui.stress` | `true` | Enables stress span highlighting. | Allows turning off visual emphasis if user only wants meter labels. |
+| `ui.meter_hints` | `true` | Shows meter annotations at line end. | Supports a cleaner “highlights only” mode when false. |
+| `ui.meter_hint_confidence_levels` | `6` | Number of confidence tint steps for EOL meter text. | Balances subtle confidence signaling vs. visual noise. |
 | `require_trailing_backslash` | `false` | If true, only scans lines ending with `\`. | Useful for mixed prose/code documents where only explicit poem lines should be scanned. |
-| `cli_cmd` | `nil` | Override CLI command list (defaults to bundled `python3 .../metermeter_cli.py`). | Enables custom Python path, venvs, wrappers, or alternate executables. |
 | `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path used by `:MeterMeterDump`. | Fast, file-based debugging without requiring interactive logging hooks. |
 | `llm.enabled` | `true` | Enables LLM refinement layer. | Lets users choose deterministic-only mode when needed. |
 | `llm.endpoint` | `http://127.0.0.1:11434/v1/chat/completions` | OpenAI-compatible chat endpoint. | Supports local Ollama and compatible providers uniformly. |

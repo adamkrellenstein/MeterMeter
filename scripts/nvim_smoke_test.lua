@@ -54,7 +54,6 @@ end
 
 local function run_poem_engine_only()
   metermeter.setup({
-    enabled_by_default = false,
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = false },
@@ -90,7 +89,6 @@ end
 
 local function run_backslash_gate()
   metermeter.setup({
-    enabled_by_default = false,
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = false },
@@ -127,7 +125,6 @@ end
 
 local function run_comment_ignore()
   metermeter.setup({
-    enabled_by_default = false,
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = false },
@@ -167,7 +164,6 @@ end
 
 local function run_filetype_token_enable()
   metermeter.setup({
-    enabled_by_default = false,
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = false },
