@@ -95,6 +95,7 @@ local function run_typst_opt_in()
     enabled_file_extensions = { ".poem" },
     opt_in_file_extensions = { ".typ" },
     opt_in_marker = "poetrymeter: on",
+    typst_only_backslash_lines = true,
   })
 
   vim.cmd("enew")
@@ -106,6 +107,7 @@ local function run_typst_opt_in()
     "",
     "#stanza[",
     "  Such trampled fruit yields wine that's sweet and red; \\",
+    "  This last line has no continuation.",
     "]",
   })
 
@@ -123,6 +125,10 @@ local function run_typst_opt_in()
     -- Should not annotate the marker/import lines (0..2). Poem content is row 4.
     if row < 3 then
       fail("typst opt-in: annotated outside stanza block (row=" .. tostring(row) .. ")")
+    end
+    -- With typst_only_backslash_lines, only the continuation line should be annotated (row 4).
+    if row == 5 then
+      fail("typst opt-in: annotated non-continuation line")
     end
   end
 end

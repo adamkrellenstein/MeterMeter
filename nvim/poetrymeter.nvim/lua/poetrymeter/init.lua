@@ -21,6 +21,12 @@ local DEFAULTS = {
   stress_style = "bold", -- "bold" | "bg"
   show_eol = true,
 
+  -- Typst filtering: when a buffer looks like Typst, only annotate inside stanza/couplet/poem
+  -- blocks. If typst_only_backslash_lines is true, only annotate lines that end in a trailing
+  -- "\" (Typst line continuation).
+  typst_only_backslash_lines = true,
+  typst_detection_max_lines = 60,
+
   -- LLM refinement (optional).
   llm = {
     enabled = true,
@@ -73,6 +79,35 @@ local function buf_ext(bufnr)
     return ""
   end
   return name:sub(dot)
+end
+
+local function looks_like_typst(bufnr)
+  local ft = (vim.bo[bufnr] and vim.bo[bufnr].filetype) or ""
+  if type(ft) == "string" and ft:lower() == "typst" then
+    return true
+  end
+
+  local max_lines = tonumber(cfg.typst_detection_max_lines) or 0
+  if max_lines <= 0 then
+    return false
+  end
+
+  local n = vim.api.nvim_buf_line_count(bufnr)
+  local limit = math.min(n, max_lines)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, limit, false)
+  for _, line in ipairs(lines) do
+    local low = vim.trim(line):lower()
+    if low:find("#stanza[", 1, true) or low:find("#couplet[", 1, true) or low:find("#poem[", 1, true) then
+      return true
+    end
+    if low:find("#import", 1, true) or low:find("#show:", 1, true) then
+      return true
+    end
+    if low:find(".typ", 1, true) and low:find("#import", 1, true) then
+      return true
+    end
+  end
+  return false
 end
 
 local function read_marker_state(bufnr)
@@ -200,7 +235,9 @@ local function typst_allowed_lines_upto(lines, max_row)
       else
         if stripped ~= "" and stripped:sub(1, 1) ~= "#" and stripped:sub(1, 1) ~= "]" then
           if stripped:sub(1, 1) ~= "{" and stripped:sub(1, 1) ~= "}" then
-            allowed[row] = true
+            if not cfg.typst_only_backslash_lines or stripped:match("\\%s*$") then
+              allowed[row] = true
+            end
           end
         end
       end
@@ -333,14 +370,13 @@ local function apply_results(bufnr, results)
 end
 
 local function build_request(bufnr, line_set)
-  local ext = buf_ext(bufnr)
   local max_len = tonumber(cfg.max_line_length) or 220
 
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   local max_row = line_count - 1
 
   local allowed_typst = nil
-  if ext == ".typ" then
+  if looks_like_typst(bufnr) then
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, line_count, false)
     allowed_typst = typst_allowed_lines_upto(lines, max_row)
   end
