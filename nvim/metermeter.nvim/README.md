@@ -78,3 +78,39 @@ require("metermeter").setup({ require_trailing_backslash = true })
 Then MeterMeter will only annotate lines that end with a trailing backslash (`\`).
 
 Comment lines are ignored using the buffer's native `&comments` / `&commentstring`.
+
+## Configuration Reference
+
+All options are passed to:
+
+```lua
+require("metermeter").setup({ ... })
+```
+
+| Option | Default | What it does | Why it exists |
+|---|---:|---|---|
+| `enabled_by_default` | `true` | Auto-enables MeterMeter on matching buffers. | Lets users install once and get immediate behavior, while allowing opt-out workflows. |
+| `max_line_length` | `220` | Skips very long lines during scan. | Prevents expensive analysis on lines unlikely to be verse (or minified text). |
+| `debounce_ms` | `80` | Delay after edits before rescanning. | Avoids rescanning on every keystroke burst. |
+| `rescan_interval_ms` | `1000` | Periodic background rescan interval; `0` disables timer. | Keeps annotations fresh during navigation/scroll without edits. |
+| `prefetch_lines` | `80` | Also scans lines around cursor, not only currently visible lines. | Reduces “pop-in” when moving through large buffers. |
+| `highlight_stress` | `true` | Enables stress span highlighting. | Allows turning off visual emphasis if user only wants meter labels. |
+| `stress_style` | `"bold"` | Stress highlight style (`"bold"` or `"bg"`). | Different color schemes/renderers need different emphasis strategies. |
+| `show_eol` | `true` | Shows meter annotations at line end. | Supports a cleaner “highlights only” mode when false. |
+| `eol_confidence_levels` | `6` | Number of confidence tint steps for EOL meter text. | Balances subtle confidence signaling vs. visual noise. |
+| `require_trailing_backslash` | `false` | If true, only scans lines ending with `\`. | Useful for mixed prose/code documents where only explicit poem lines should be scanned. |
+| `cli_cmd` | `nil` | Override CLI command list (defaults to bundled `python3 .../metermeter_cli.py`). | Enables custom Python path, venvs, wrappers, or alternate executables. |
+| `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path used by `:MeterMeterDump`. | Fast, file-based debugging without requiring interactive logging hooks. |
+| `llm.enabled` | `true` | Enables LLM refinement layer. | Lets users choose deterministic-only mode when needed. |
+| `llm.endpoint` | `http://127.0.0.1:11434/v1/chat/completions` | OpenAI-compatible chat endpoint. | Supports local Ollama and compatible providers uniformly. |
+| `llm.model` | `qwen2.5:7b-instruct` | Model name sent to endpoint. | Keeps model choice explicit and user-switchable. |
+| `llm.timeout_ms` | `30000` | HTTP timeout for LLM calls. | Prevents scanner stalls on slow/unavailable models. |
+| `llm.temperature` | `0.1` | Sampling temperature for refinement requests. | Keeps output mostly deterministic for meter tasks. |
+| `llm.max_lines_per_scan` | `2` | Max lines sent to LLM per scan cycle. | Controls latency/cost and keeps editor responsiveness stable. |
+| `llm.hide_non_refined` | `false` | Hide meter labels for lines not refined by LLM. | Supports “LLM-only confidence” display preference. |
+
+Global toggle:
+
+| Variable | Default | What it does | Why it exists |
+|---|---:|---|---|
+| `vim.g.metermeter_disable_auto_setup` | `0` | If `1`, plugin won’t auto-call `setup()`. | Prevents double-setup and lets plugin managers/users fully control initialization order. |

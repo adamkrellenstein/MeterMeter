@@ -334,7 +334,6 @@ local function ensure_state(bufnr)
     timer = nil,
     tick = nil,
     cache = {},
-    last_lines = {},
   }
   state_by_buf[bufnr] = st
   return st

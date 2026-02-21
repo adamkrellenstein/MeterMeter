@@ -56,3 +56,12 @@ class NvimStressSpanTests(unittest.TestCase):
         b_end = len(line[:token_end].encode("utf-8"))
         for s, e in spans:
             self.assertFalse(s <= b_start and e >= b_end, (s, e, b_start, b_end))
+
+    def test_monosyllable_span_runs_from_nucleus_to_word_end(self) -> None:
+        line = "might"
+        spans = metermeter_cli._stress_spans_for_line(line, ["S"])
+        self.assertEqual(len(spans), 1)
+        s, e = spans[0]
+        # "might": vowel group starts at "i" (index 1), highlight should include "ight".
+        self.assertEqual(s, 1)
+        self.assertEqual(e, len(line))

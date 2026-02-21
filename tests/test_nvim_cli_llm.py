@@ -78,3 +78,45 @@ class NvimCLILLMTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertTrue(all(r.get("source") == "llm" for r in results), results)
 
+    def test_cli_uses_engine_when_llm_disabled(self) -> None:
+        req = {
+            "config": {"llm": {"enabled": False}},
+            "lines": [
+                {"lnum": 0, "text": "The trampled fruit yields wine that's sweet and red."},
+                {"lnum": 1, "text": "And plants will dream, thy flax to fit a nuptial bed."},
+            ],
+        }
+
+        stdin = io.StringIO(json.dumps(req, ensure_ascii=True))
+        stdout = io.StringIO()
+        with patch("sys.stdin", stdin), patch("sys.stdout", stdout):
+            rc = metermeter_cli.main()
+        self.assertEqual(rc, 0)
+
+        out = json.loads(stdout.getvalue() or "{}")
+        results = out.get("results") or []
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r.get("source") == "engine" for r in results), results)
+
+    def test_cli_ignores_invalid_line_entries(self) -> None:
+        req = {
+            "config": {"llm": {"enabled": False}},
+            "lines": [
+                {"lnum": 0, "text": "Valid line one."},
+                {"text": "missing line number"},
+                {"lnum": "2", "text": "bad lnum type"},
+                {"lnum": 3, "text": 123},
+                "not-a-dict",
+                {"lnum": 4, "text": "Valid line two."},
+            ],
+        }
+
+        stdin = io.StringIO(json.dumps(req, ensure_ascii=True))
+        stdout = io.StringIO()
+        with patch("sys.stdin", stdin), patch("sys.stdout", stdout):
+            rc = metermeter_cli.main()
+        self.assertEqual(rc, 0)
+
+        out = json.loads(stdout.getvalue() or "{}")
+        results = out.get("results") or []
+        self.assertEqual([r.get("lnum") for r in results], [0, 4])

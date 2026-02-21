@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 from unittest.mock import patch
+import urllib.error
 
 
 def _nvim_python_path() -> str:
@@ -103,3 +104,69 @@ class NvimLLMRefinerTests(unittest.TestCase):
         self.assertIn(1, out)
         self.assertEqual(out[1].token_patterns, baselines[0].token_patterns)
 
+    def test_parses_fenced_json_content(self) -> None:
+        baselines = [_baseline(7, "To strive to seek")]
+        content = "```json\n" + json.dumps(
+            {
+                "results": [
+                    {
+                        "line_no": 7,
+                        "meter_name": "iambic dimeter",
+                        "confidence": 0.71,
+                        "analysis_hint": "fenced",
+                        "token_stress_patterns": ["U", "S", "U", "S"],
+                    }
+                ]
+            },
+            ensure_ascii=True,
+        ) + "\n```"
+        response = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=True)
+
+        with patch("urllib.request.urlopen", return_value=_Resp(response)):
+            ref = LLMRefiner(endpoint="http://mock", model="mock")
+            out = ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
+
+        self.assertIn(7, out)
+        self.assertEqual(out[7].analysis_hint, "fenced")
+
+    def test_clamps_confidence_and_trims_hint(self) -> None:
+        baselines = [_baseline(5, "To strive to seek")]
+        long_hint = "x " * 200
+        content = json.dumps(
+            {
+                "results": [
+                    {
+                        "line_no": 5,
+                        "meter_name": "iambic dimeter",
+                        "confidence": 9.0,
+                        "analysis_hint": long_hint,
+                        "token_stress_patterns": ["U", "S", "U", "S"],
+                    }
+                ]
+            },
+            ensure_ascii=True,
+        )
+        response = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=True)
+
+        with patch("urllib.request.urlopen", return_value=_Resp(response)):
+            ref = LLMRefiner(endpoint="http://mock", model="mock")
+            out = ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
+
+        self.assertIn(5, out)
+        self.assertLessEqual(out[5].confidence, 1.0)
+        self.assertLessEqual(len(out[5].analysis_hint), 220)
+
+    def test_http_error_raises_runtime_error(self) -> None:
+        baselines = [_baseline(3, "To strive to seek")]
+        http_err = urllib.error.HTTPError(
+            url="http://mock",
+            code=404,
+            msg="Not Found",
+            hdrs={},
+            fp=None,
+        )
+        with patch("urllib.request.urlopen", side_effect=http_err):
+            ref = LLMRefiner(endpoint="http://mock", model="mock")
+            with self.assertRaises(RuntimeError):
+                ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
+        http_err.close()

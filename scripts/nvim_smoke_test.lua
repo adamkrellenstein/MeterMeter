@@ -165,10 +165,38 @@ local function run_comment_ignore()
   end
 end
 
+local function run_filetype_token_enable()
+  metermeter.setup({
+    enabled_by_default = false,
+    rescan_interval_ms = 0,
+    debounce_ms = 1,
+    llm = { enabled = false },
+    require_trailing_backslash = false,
+  })
+
+  vim.cmd("enew")
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_name(bufnr, "/tmp/metermeter_smoke_token.txt")
+  -- Modeline-style enable path: filetype includes "metermeter" token.
+  vim.bo[bufnr].filetype = "typst.metermeter"
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+    "A line that should be annotated via filetype token.",
+  })
+
+  metermeter.enable(bufnr)
+  local ok = wait_for(function()
+    return #extmarks(bufnr) > 0
+  end, 4000)
+  if not ok then
+    fail("filetype token: no extmarks created")
+  end
+end
+
 local function main()
   run_poem_engine_only()
   run_backslash_gate()
   run_comment_ignore()
+  run_filetype_token_enable()
   vim.cmd("qa!")
 end
 
