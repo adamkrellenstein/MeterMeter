@@ -201,10 +201,17 @@ local function visible_line_set_for_buf(bufnr)
   local wins = vim.fn.win_findbuf(bufnr)
   local out = {}
   for _, win in ipairs(wins) do
-    if vim.api.nvim_win_is_valid(win) then
+    win = tonumber(win) or win
+    if type(win) == "number" and vim.api.nvim_win_is_valid(win) then
       local w0, w1 = vim.api.nvim_win_call(win, function()
-        return vim.fn.line("w0") - 1, vim.fn.line("w$") - 1
+        -- vim.fn.line() can return a string in some builds; coerce later.
+        return vim.fn.line("w0"), vim.fn.line("w$")
       end)
+      w0 = (tonumber(w0) or 1) - 1
+      w1 = (tonumber(w1) or (w0 + 1)) - 1
+      if w1 < w0 then
+        w0, w1 = w1, w0
+      end
       for l = w0, w1 do
         out[l] = true
       end
