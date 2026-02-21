@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PoetryMeter.llm_bootstrap import BootstrapError, bootstrap_local_llm
+from llm_bootstrap import BootstrapError, bootstrap_local_llm
 
 
 class _Settings(dict):

@@ -1,6 +1,6 @@
 import unittest
 
-from PoetryMeter.llm_setup_catalog import hardware_options, model_profiles_for_hardware
+from llm_setup_catalog import hardware_options, model_profiles_for_hardware
 
 
 class LLMSetupCatalogTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 import unittest
 
-from PoetryMeter.llm_sidecar import LLMSidecarManager, SidecarConfig
+from llm_sidecar import LLMSidecarManager, SidecarConfig
 
 
 class _FakeProc:

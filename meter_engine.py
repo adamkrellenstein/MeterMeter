@@ -2,7 +2,7 @@ import gzip
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 try:
@@ -40,6 +40,7 @@ class LineAnalysis:
     confidence: float
     oov_tokens: List[str]
     debug_scores: Dict[str, float]
+    token_patterns: List[str] = field(default_factory=list)
     analysis_hint: str = ""
     source: str = "engine"
 
@@ -181,6 +182,7 @@ class MeterEngine:
             confidence=confidence,
             oov_tokens=oov_tokens,
             debug_scores=debug_scores,
+            token_patterns=list(patterns),
         )
 
     def analyze_lines(self, lines: List[str], start_line_no: int = 0) -> Dict[int, LineAnalysis]:

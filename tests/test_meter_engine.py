@@ -1,6 +1,6 @@
 import unittest
 
-from PoetryMeter.meter_engine import MeterEngine
+from meter_engine import MeterEngine
 
 
 class MeterEngineTests(unittest.TestCase):
