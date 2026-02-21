@@ -16,6 +16,7 @@ local DEFAULTS = {
   highlight_stress = true,
   stress_style = "bold", -- "bold" | "bg"
   show_eol = true,
+  eol_confidence_levels = 6, -- number of discrete tints for EOL meter annotation (>= 2)
 
   -- LLM refinement (optional).
   llm = {
@@ -132,6 +133,71 @@ local function compute_stress_hl()
   vim.api.nvim_set_hl(0, "PoetryMeterEOL", { link = "Comment" })
 end
 
+local function _blend_rgb(a, b, t)
+  t = math.max(0, math.min(1, tonumber(t) or 0))
+  local ar = math.floor(a / 65536) % 256
+  local ag = math.floor(a / 256) % 256
+  local ab = a % 256
+  local br = math.floor(b / 65536) % 256
+  local bg = math.floor(b / 256) % 256
+  local bb = b % 256
+  local rr = math.floor(ar + (br - ar) * t + 0.5)
+  local rg = math.floor(ag + (bg - ag) * t + 0.5)
+  local rb = math.floor(ab + (bb - ab) * t + 0.5)
+  return rr * 65536 + rg * 256 + rb
+end
+
+local function compute_eol_hls()
+  -- Confidence-driven meter hint: more confident => closer to Normal, less confident => closer to Comment.
+  local levels = tonumber(cfg.eol_confidence_levels) or 6
+  if levels < 2 then
+    levels = 2
+  end
+  if levels > 12 then
+    levels = 12
+  end
+
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = true }) or {}
+  local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = true }) or {}
+  local nfg = normal.fg or normal.foreground
+  local nbg = normal.bg or normal.background
+  local cfgc = comment.fg or comment.foreground
+
+  -- If we don't have truecolor info, fall back to cterm greys.
+  if type(nfg) ~= "number" or type(nbg) ~= "number" or type(cfgc) ~= "number" then
+    local dark = (vim.o.background or ""):lower() ~= "light"
+    for i = 0, levels - 1 do
+      local t = i / (levels - 1)
+      -- On dark themes, higher t => brighter; on light themes, higher t => darker.
+      local c = dark and (240 + math.floor(t * 14 + 0.5)) or (252 - math.floor(t * 14 + 0.5))
+      vim.api.nvim_set_hl(0, "PoetryMeterEOL" .. tostring(i), { ctermfg = c })
+    end
+    return
+  end
+
+  for i = 0, levels - 1 do
+    local t = i / (levels - 1)
+    local fg = _blend_rgb(cfgc, nfg, t)
+    vim.api.nvim_set_hl(0, "PoetryMeterEOL" .. tostring(i), { fg = fg })
+  end
+end
+
+local function eol_hl_for_conf(conf)
+  local levels = tonumber(cfg.eol_confidence_levels) or 6
+  if levels < 2 then
+    levels = 2
+  end
+  if levels > 12 then
+    levels = 12
+  end
+  if type(conf) ~= "number" then
+    return "PoetryMeterEOL0"
+  end
+  conf = math.max(0, math.min(1, conf))
+  local idx = math.floor(conf * (levels - 1) + 0.5)
+  return "PoetryMeterEOL" .. tostring(idx)
+end
+
 local function is_poetry_line(text)
   -- KISS: only annotate lines explicitly marked by a trailing backslash.
   local s = vim.trim(text or "")
@@ -227,15 +293,16 @@ local function apply_results(bufnr, results)
       local src = item.source or ""
       local conf = item.confidence
       if type(conf) == "number" then
-        label = string.format("%s %.0f%%", item.meter_name or label, conf * 100.0)
+        label = tostring(item.meter_name or label or "")
       end
       if cfg.llm.hide_non_refined and src ~= "llm" then
         label = ""
         hint = ""
       end
       if cfg.show_eol and label ~= "" then
+        local hl = eol_hl_for_conf(conf)
         vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, 0, {
-          virt_text = { { " " .. label, "PoetryMeterEOL" } },
+          virt_text = { { " " .. label, hl } },
           virt_text_pos = "eol",
         })
       end
@@ -480,9 +547,13 @@ function M.setup(opts)
   cfg = vim.tbl_deep_extend("force", vim.deepcopy(DEFAULTS), opts)
 
   compute_stress_hl()
+  compute_eol_hls()
   vim.api.nvim_create_autocmd("ColorScheme", {
     group = vim.api.nvim_create_augroup("PoetryMeterColors", { clear = true }),
-    callback = compute_stress_hl,
+    callback = function()
+      compute_stress_hl()
+      compute_eol_hls()
+    end,
   })
 
   local group = vim.api.nvim_create_augroup("PoetryMeter", { clear = true })

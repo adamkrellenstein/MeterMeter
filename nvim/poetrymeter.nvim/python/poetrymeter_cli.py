@@ -76,10 +76,21 @@ def _stress_spans_for_line(text: str, token_patterns: List[str]) -> List[List[in
         # Prefer highlighting the vowel nuclei for each syllable (more visible than trying to
         # guess full syllable boundaries). If vowel-group count mismatches, fall back.
         groups = list(VOWEL_GROUP_RE.finditer(token))
-        if len(groups) == len(pat):
+        pat_len = len(pat)
+        # Common mismatch: silent trailing "e" creates an extra vowel group (e.g. "glance", "bare").
+        if pat_len >= 1 and len(groups) == pat_len + 1 and token.lower().endswith("e"):
+            last = groups[-1].group(0).lower()
+            if last == "e":
+                groups = groups[:-1]
+
+        if pat_len == 1 and groups:
+            # For 1-syllable tokens, show the primary nucleus (first vowel group) rather than
+            # bolding the whole word.
+            syl_spans = [(groups[0].start(), groups[0].end())]
+        elif len(groups) == pat_len and groups:
             syl_spans = [(g.start(), g.end()) for g in groups]
         else:
-            syl_spans = _syllable_spans(token, len(pat))
+            syl_spans = _syllable_spans(token, pat_len)
 
         for syl_idx, flag in enumerate(pat):
             if flag != "S":
