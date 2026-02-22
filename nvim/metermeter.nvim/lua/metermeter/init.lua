@@ -43,7 +43,7 @@ local DEFAULTS = {
     max_entries = 5000,
   },
 
-  lexicon_path = "",
+  lexicon_path = "~/.metermeter/cmudict.json.gz",
   extra_lexicon_path = "",
 
   debug_dump_path = "/tmp/metermeter_nvim_dump.json",

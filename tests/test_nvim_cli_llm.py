@@ -69,7 +69,8 @@ class NvimCLILLMTests(unittest.TestCase):
                     "timeout_ms": 1000,
                     "temperature": 0.1,
                     "max_lines_per_scan": 1,
-                }
+                },
+                "lexicon_path": "",
             },
             "lines": [
                 {"lnum": 0, "text": "florp"},
@@ -98,7 +99,8 @@ class NvimCLILLMTests(unittest.TestCase):
                     "timeout_ms": 1000,
                     "temperature": 0.1,
                     "max_lines_per_scan": 2,
-                }
+                },
+                "lexicon_path": "",
             },
             "lines": [
                 {"lnum": 0, "text": "The trampled fruit yields wine that's sweet and red."},
@@ -146,7 +148,7 @@ class NvimCLILLMTests(unittest.TestCase):
 
     def test_cli_errors_when_llm_disabled(self) -> None:
         req = {
-            "config": {"llm": {"enabled": False}},
+            "config": {"llm": {"enabled": False}, "lexicon_path": ""},
             "lines": [
                 {"lnum": 0, "text": "The trampled fruit yields wine that's sweet and red."},
                 {"lnum": 1, "text": "And plants will dream, thy flax to fit a nuptial bed."},
@@ -167,7 +169,10 @@ class NvimCLILLMTests(unittest.TestCase):
 
     def test_cli_ignores_invalid_line_entries(self) -> None:
         req = {
-            "config": {"llm": {"enabled": True, "endpoint": "mock://llm", "model": "mock", "max_lines_per_scan": 16}},
+            "config": {
+                "llm": {"enabled": True, "endpoint": "mock://llm", "model": "mock", "max_lines_per_scan": 16},
+                "lexicon_path": "",
+            },
             "lines": [
                 {"lnum": 0, "text": "Valid line one."},
                 {"text": "missing line number"},
@@ -198,7 +203,8 @@ class NvimCLILLMTests(unittest.TestCase):
                     "model": "mock",
                     "max_lines_per_scan": 16,
                     "eval_mode": "strict",
-                }
+                },
+                "lexicon_path": "",
             },
             "lines": [
                 {"lnum": 0, "text": "Valid line one."},

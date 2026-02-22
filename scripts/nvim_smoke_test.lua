@@ -35,6 +35,7 @@ local function run_backslash_gate()
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
+    lexicon_path = "",
     require_trailing_backslash = true,
   })
 
@@ -71,6 +72,7 @@ local function run_comment_ignore()
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
+    lexicon_path = "",
     require_trailing_backslash = false,
   })
 
@@ -110,6 +112,7 @@ local function run_filetype_token_enable()
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
+    lexicon_path = "",
     require_trailing_backslash = false,
   })
 
@@ -136,6 +139,7 @@ local function run_duplicate_lines_cache_binding()
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
+    lexicon_path = "",
     require_trailing_backslash = false,
   })
 
@@ -172,6 +176,7 @@ local function run_manual_toggle_for_non_poem()
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
+    lexicon_path = "",
     require_trailing_backslash = false,
   })
 
@@ -209,6 +214,7 @@ local function run_idle_no_extra_work()
     rescan_interval_ms = 100,
     debounce_ms = 1,
     llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
+    lexicon_path = "",
     require_trailing_backslash = false,
   })
 
@@ -255,6 +261,7 @@ local function run_error_hint()
     rescan_interval_ms = 0,
     debounce_ms = 1,
     llm = { enabled = false },
+    lexicon_path = "",
     require_trailing_backslash = false,
     ui = { show_error_hint = true },
   })

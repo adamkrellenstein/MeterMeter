@@ -213,10 +213,15 @@ def main() -> int:
     config = req.get("config") or {}
     llm_cfg = (config.get("llm") or {}) if isinstance(config, dict) else {}
     context_cfg = (config.get("context") or {}) if isinstance(config, dict) else {}
-    lexicon_path = str(config.get("lexicon_path") or "").strip() if isinstance(config, dict) else ""
-    extra_lexicon_path = str(config.get("extra_lexicon_path") or "").strip() if isinstance(config, dict) else ""
-    lexicon_path = _resolve_lexicon_path(lexicon_path)
-    extra_lexicon_path = _resolve_extra_lexicon_path(extra_lexicon_path)
+    lexicon_path_cfg = str(config.get("lexicon_path") or "").strip() if isinstance(config, dict) else ""
+    extra_lexicon_path_cfg = str(config.get("extra_lexicon_path") or "").strip() if isinstance(config, dict) else ""
+    lexicon_required = bool(lexicon_path_cfg)
+    lexicon_path = _resolve_lexicon_path(lexicon_path_cfg)
+    extra_lexicon_path = _resolve_extra_lexicon_path(extra_lexicon_path_cfg)
+
+    if lexicon_required and (not lexicon_path or not os.path.exists(lexicon_path)):
+        error_msg = "lexicon_missing: {}".format(lexicon_path_cfg)
+        lexicon_path = ""
 
     engine = MeterEngine(dict_path=lexicon_path or None)
     if extra_lexicon_path:
@@ -250,7 +255,9 @@ def main() -> int:
     if eval_mode not in {"production", "strict"}:
         eval_mode = "production"
 
-    if not llm_enabled:
+    if error_msg is not None:
+        pass
+    elif not llm_enabled:
         error_msg = "llm_disabled"
     elif not endpoint or not model:
         error_msg = "llm_not_configured: endpoint/model required"
