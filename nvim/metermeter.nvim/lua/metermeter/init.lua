@@ -510,7 +510,55 @@ local function maybe_apply_results(bufnr, results)
   apply_results(bufnr, results)
 end
 
-local function build_request(bufnr, ordered_lines, llm_enabled_override, require_llm_source)
+local function dominant_context_for_lines(bufnr, line_set)
+  local st = ensure_state(bufnr)
+  local counts = {}
+  local total = 0
+  local seen = 0
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  for _, lnum in ipairs(line_set or {}) do
+    if lnum >= 0 and lnum < line_count then
+      local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
+      if is_scan_line(bufnr, text) then
+        local key = _cache_key_for_text(text)
+        local cached = _cache_get(st, key)
+        if cached and cached.source == "llm" and type(cached.meter_name) == "string" and cached.meter_name ~= "" then
+          local meter = string.lower(vim.trim(cached.meter_name))
+          local conf = tonumber(cached.confidence) or 0.5
+          conf = math.max(0.05, math.min(1.0, conf))
+          counts[meter] = (counts[meter] or 0) + conf
+          total = total + conf
+          seen = seen + 1
+        end
+      end
+    end
+  end
+
+  local best_meter = ""
+  local best_weight = 0
+  for meter, weight in pairs(counts) do
+    if weight > best_weight then
+      best_meter = meter
+      best_weight = weight
+    end
+  end
+
+  local ratio = 0
+  if total > 0 then
+    ratio = best_weight / total
+  end
+
+  st.dominant_meter = best_meter
+  st.dominant_ratio = ratio
+  st.dominant_line_count = seen
+  return {
+    dominant_meter = best_meter,
+    dominant_ratio = ratio,
+    dominant_line_count = seen,
+  }
+end
+
+local function build_request(bufnr, ordered_lines, llm_enabled_override, require_llm_source, context)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
 
   local lines = {}
@@ -546,6 +594,7 @@ local function build_request(bufnr, ordered_lines, llm_enabled_override, require
   return {
     config = {
       llm = llm_cfg,
+      context = context or {},
     },
     lines = lines,
   }
@@ -609,7 +658,7 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
   return out
 end
 
-local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chunk_size, llm_enabled, require_llm_source, on_done)
+local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chunk_size, llm_enabled, require_llm_source, context_fn, on_done)
   local chunks = scanner.chunk_lines(lines or {}, chunk_size)
   local idx = 1
 
@@ -625,7 +674,14 @@ local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chun
       return
     end
 
-    local req = build_request(bufnr, chunks[idx], llm_enabled, require_llm_source)
+    local context = {}
+    if type(context_fn) == "function" then
+      local ok_ctx, built_ctx = pcall(context_fn)
+      if ok_ctx and type(built_ctx) == "table" then
+        context = built_ctx
+      end
+    end
+    local req = build_request(bufnr, chunks[idx], llm_enabled, require_llm_source, context)
     idx = idx + 1
     if #req.lines == 0 then
       step()
@@ -752,9 +808,13 @@ local function do_scan(bufnr)
     return
   end
 
-  run_chunk_phase(bufnr, gen, render_lines, visible_lines, llm_batch, true, true, function()
-    run_chunk_phase(bufnr, gen, render_lines, prefetch_lines, llm_batch, true, true, function()
-      run_chunk_phase(bufnr, gen, render_lines, background_lines, llm_batch, true, true, function()
+  local function context_fn()
+    return dominant_context_for_lines(bufnr, all_scan_lines)
+  end
+
+  run_chunk_phase(bufnr, gen, render_lines, visible_lines, llm_batch, true, true, context_fn, function()
+    run_chunk_phase(bufnr, gen, render_lines, prefetch_lines, llm_batch, true, true, context_fn, function()
+      run_chunk_phase(bufnr, gen, render_lines, background_lines, llm_batch, true, true, context_fn, function()
         local st3 = ensure_state(bufnr)
         if st3.scan_generation == gen then
           st3.last_llm_changedtick = changedtick
@@ -875,13 +935,16 @@ function M.status(bufnr)
   local override = st.user_enabled
   local cool_ms = math.max(0, (tonumber(st.llm_cooldown_until) or 0) - uv.now())
   local msg = string.format(
-    "MeterMeter status: enabled=%s effective=%s auto=%s override=%s llm_cooldown_ms=%d llm_calls=%d llm_error=%s",
+    "MeterMeter status: enabled=%s effective=%s auto=%s override=%s llm_cooldown_ms=%d llm_calls=%d dominant=%s ratio=%.2f lines=%d llm_error=%s",
     tostring(st.enabled),
     tostring(effective),
     tostring(auto),
     tostring(override),
     math.floor(cool_ms),
     tonumber(st.debug_llm_cli_count) or 0,
+    tostring(st.dominant_meter or ""),
+    tonumber(st.dominant_ratio) or 0,
+    tonumber(st.dominant_line_count) or 0,
     tostring(st.llm_error or "")
   )
   vim.notify(msg, vim.log.levels.INFO)

@@ -16,6 +16,10 @@ FOOT_TEMPLATES = {
     "dactylic": "SUU",
 }
 
+METER_NAME_RE = re.compile(
+    r"^\s*(iambic|trochaic|anapestic|dactylic)\s+(monometer|dimeter|trimeter|tetrameter|pentameter|hexameter)\s*$"
+)
+
 LINE_NAME_BY_FEET = {
     1: "monometer",
     2: "dimeter",
@@ -282,6 +286,76 @@ class MeterEngine:
         unit = FOOT_TEMPLATES[foot_name]
         return unit * feet
 
+    def _score_pattern_for_meter(self, pattern: str, foot_name: str, feet: int) -> float:
+        if not pattern:
+            return 0.0
+        template = self._template_for_meter(foot_name, feet)
+        dist = self._pattern_distance(pattern, template, foot_name)
+        dist += self._foot_position_penalty(pattern, foot_name, feet)
+        normalizer = max(len(pattern), len(template), 1)
+        score = max(0.0, 1.0 - (dist / normalizer))
+        # Prior: sonnet-like line lengths favor binary feet over ternary feet.
+        if 9 <= len(pattern) <= 11:
+            if foot_name in {"iambic", "trochaic"} and feet == 5:
+                if foot_name == "iambic":
+                    score += 0.18
+                else:
+                    score += 0.03
+            if foot_name in {"anapestic", "dactylic"}:
+                score -= 0.14
+        return max(0.0, min(1.0, score))
+
+    def _parse_meter_name(self, meter_name: str) -> Optional[Tuple[str, int]]:
+        m = METER_NAME_RE.match((meter_name or "").strip().lower())
+        if not m:
+            return None
+        foot_name, feet_name = m.group(1), m.group(2)
+        feet = None
+        for n, label in LINE_NAME_BY_FEET.items():
+            if label == feet_name:
+                feet = n
+                break
+        if feet is None:
+            return None
+        return foot_name, feet
+
+    def score_stress_pattern_for_meter(self, stress_pattern: str, meter_name: str) -> Optional[float]:
+        parsed = self._parse_meter_name(meter_name)
+        if not parsed:
+            return None
+        foot_name, feet = parsed
+        pattern = "".join(ch for ch in (stress_pattern or "").upper() if ch in {"U", "S"})
+        if not pattern:
+            return None
+        return self._score_pattern_for_meter(pattern, foot_name, feet)
+
+    def best_meter_for_stress_pattern(self, stress_pattern: str) -> Tuple[str, float, Dict[str, float]]:
+        pattern = "".join(ch for ch in (stress_pattern or "").upper() if ch in {"U", "S"})
+        if not pattern:
+            return "", 0.0, {"margin": 0.0}
+
+        candidates: List[Tuple[str, int, float]] = self._meter_candidates(pattern)
+        rescored: List[Tuple[str, int, float]] = []
+        for foot_name, feet, _ in candidates:
+            score = self._score_pattern_for_meter(pattern, foot_name, feet)
+            rescored.append((foot_name, feet, score))
+
+        if not rescored:
+            return "", 0.0, {"margin": 0.0}
+        rescored.sort(key=lambda item: item[2], reverse=True)
+        best_name, best_feet, best_score = rescored[0]
+        second_score = rescored[1][2] if len(rescored) > 1 else 0.0
+        margin = max(0.0, best_score - second_score)
+        line_name = LINE_NAME_BY_FEET.get(best_feet, f"{best_feet}-foot")
+        meter_name = f"{best_name} {line_name}"
+        debug = {
+            "margin": margin,
+            "second_score": second_score,
+        }
+        for i, (name, feet, score) in enumerate(rescored[:4], start=1):
+            debug[f"top{i}_{name}_{feet}"] = score
+        return meter_name, best_score, debug
+
     def _foot_position_penalty(self, pattern: str, foot_name: str, feet: int) -> float:
         if not pattern:
             return 0.0
@@ -360,22 +434,13 @@ class MeterEngine:
 
         stress_pattern = "".join(built)
         dist = self._pattern_distance(stress_pattern, template, foot_name)
-        # Include lexical choice penalty; normalize to pattern length.
+        # Include lexical choice penalty before final meter scoring.
         dist += option_penalty * 0.5
-        dist += self._foot_position_penalty(stress_pattern, foot_name, feet)
         normalizer = max(len(stress_pattern), templ_len, 1)
-        score = max(0.0, 1.0 - (dist / normalizer))
-
-        # Prior: sonnet-like line lengths favor binary feet over ternary feet.
-        if 9 <= len(stress_pattern) <= 11:
-            if foot_name in {"iambic", "trochaic"} and feet == 5:
-                if foot_name == "iambic":
-                    score += 0.18
-                else:
-                    score += 0.03
-            if foot_name in {"anapestic", "dactylic"}:
-                score -= 0.14
-        score = max(0.0, min(1.0, score))
+        adjusted_pattern_score = max(0.0, 1.0 - (dist / normalizer))
+        score = self._score_pattern_for_meter(stress_pattern, foot_name, feet)
+        # Blend lexical fit and global meter fit.
+        score = max(0.0, min(1.0, (score * 0.75) + (adjusted_pattern_score * 0.25)))
         return stress_pattern, score, chosen_patterns, oov_tokens
 
     def analyze_line(self, line: str, line_no: int = 0) -> Optional[LineAnalysis]:

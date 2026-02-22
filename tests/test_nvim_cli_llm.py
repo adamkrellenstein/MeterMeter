@@ -157,3 +157,56 @@ class NvimCLILLMTests(unittest.TestCase):
         eval_obj = out.get("eval") or {}
         self.assertEqual(eval_obj.get("mode"), "strict")
         self.assertTrue(eval_obj.get("strict"))
+
+    def test_cli_rescores_meter_name_from_token_pattern(self) -> None:
+        req = {
+            "config": {
+                "llm": {
+                    "enabled": True,
+                    "endpoint": "http://mock",
+                    "model": "mock-model",
+                    "timeout_ms": 1000,
+                    "temperature": 0.1,
+                    "max_lines_per_scan": 4,
+                },
+                "context": {
+                    "dominant_meter": "iambic pentameter",
+                    "dominant_ratio": 0.85,
+                    "dominant_line_count": 12,
+                },
+            },
+            "lines": [
+                {"lnum": 0, "text": "The trampled fruit yields wine that's sweet and red."},
+            ],
+        }
+        content = json.dumps(
+            {
+                "results": [
+                    {
+                        "line_no": 0,
+                        "meter_name": "trochaic tetrameter",
+                        "confidence": 0.60,
+                        "analysis_hint": "mock",
+                        "token_stress_patterns": ["U", "SU", "S", "U", "S", "U", "S", "U", "S"],
+                    }
+                ]
+            },
+            ensure_ascii=True,
+        )
+        response = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=True)
+
+        stdin = io.StringIO(json.dumps(req, ensure_ascii=True))
+        stdout = io.StringIO()
+        with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch("urllib.request.urlopen", return_value=_Resp(response)):
+            rc = metermeter_cli.main()
+        self.assertEqual(rc, 0)
+
+        out = json.loads(stdout.getvalue() or "{}")
+        results = out.get("results") or []
+        self.assertEqual(len(results), 1)
+        row = results[0]
+        self.assertEqual(row.get("meter_name_llm"), "trochaic tetrameter")
+        self.assertEqual(row.get("meter_name"), "iambic pentameter")
+        self.assertTrue(row.get("meter_overridden"))
+        self.assertEqual(row.get("override_reason"), "pattern_rescore")
+        self.assertEqual((out.get("eval") or {}).get("meter_overrides"), 1)

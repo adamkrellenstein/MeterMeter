@@ -26,6 +26,7 @@ Pipeline behavior is LLM-first and LLM-required:
 
 1. Meter labels and stress highlights are shown only from valid LLM output.
 2. If the model/endpoint is unavailable or response is invalid, no annotations are shown for that scan.
+3. Meter labels are post-validated against returned stress patterns; low-confidence outliers can be smoothed toward the dominant poem meter when evidence supports it.
 
 ### What The LLM Is Used For
 
@@ -36,7 +37,8 @@ Pipeline behavior is LLM-first and LLM-required:
 ### Deterministic Layer
 
 - Used for tokenization/syllable scaffolding and rendering guardrails.
-- Not used as a user-visible meter fallback.
+- Used to rescore LLM labels against stress templates and to apply conservative dominant-meter smoothing.
+- Not used as a user-visible meter fallback when LLM is unavailable.
 
 ## Requirements
 
@@ -196,7 +198,8 @@ The repository uses a layered regression strategy:
 
 - Python unit tests (`tests/test_nvim_*.py`)
   - Stress-span correctness and clipping behavior.
-  - LLM parsing/validation behavior with mocked responses.
+- LLM parsing/validation behavior with mocked responses.
+- Deterministic stress-pattern rescoring tests (meter-template consistency).
 - Canonical meter accuracy floors on Shakespeare fixtures:
   - Sonnet 18
   - Sonnet 116
@@ -205,6 +208,7 @@ The repository uses a layered regression strategy:
 - Broader corpus regressions:
   - Non-Shakespeare formal sonnet benchmark (Milton) with iambic-pentameter floor.
   - Free-verse behavior guard (Whitman) to avoid over-collapsing to a single meter class.
+  - Targeted known-regression lines (Shakespeare + Milton) to protect specific historical failure cases.
 
 - Cache/scheduling regressions
   - Duplicate-line correctness: repeated identical lines must annotate on every row.

@@ -73,6 +73,19 @@ WEAK_SUFFIXES = (
     "ness",
 )
 
+ELIDED_SYLLABLE_OVERRIDES = {
+    "heaven": 1,
+    "even": 1,
+    "every": 2,
+    "oer": 1,
+    "o'er": 1,
+    "power": 1,
+    "hour": 1,
+    "flower": 1,
+    "fiery": 2,
+    "spirit": 2,
+}
+
 
 def clean_word(word: str) -> str:
     return NON_ALPHA_RE.sub("", word.lower()).strip("'")
@@ -82,6 +95,10 @@ def estimate_syllables(word: str) -> int:
     clean = clean_word(word)
     if not clean:
         return 0
+
+    override = ELIDED_SYLLABLE_OVERRIDES.get(clean)
+    if isinstance(override, int) and override > 0:
+        return override
 
     groups = VOWEL_GROUP_RE.findall(clean)
     syllables = len(groups)
@@ -123,4 +140,3 @@ def estimate_stress_pattern(word: str) -> str:
         return _build_pattern(syllables, max(0, syllables - 2))
 
     return _build_pattern(syllables, 0)
-

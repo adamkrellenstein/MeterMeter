@@ -78,10 +78,21 @@ class LLMRefiner:
             headers["Authorization"] = "Bearer " + self.api_key
         return headers
 
-    def _system_prompt(self) -> str:
+    def _system_prompt(self, dominant_meter: str = "", dominant_ratio: float = 0.0) -> str:
+        dominant_clause = ""
+        if dominant_meter:
+            dominant_clause = (
+                "Poem-level prior: the dominant meter is '{}'"
+                " (ratio {:.0f}%). Prefer that meter unless the line clearly deviates. ".format(
+                    dominant_meter, max(0.0, min(1.0, dominant_ratio)) * 100.0
+                )
+            )
         return (
             "You are an expert in English poetic meter and scansion. "
             "Analyze stress at the whole-line level, not per-word dictionary stress in isolation. "
+            "Use each line's baseline_meter and baseline_confidence as priors; do not deviate unless strong evidence supports it. "
+            + dominant_clause
+            + "For lines with 9-11 syllables, pentameter is the default unless stress pattern strongly conflicts. "
             "Return ONLY strict JSON with this exact top-level shape: {\"results\":[...]}. "
             "Return exactly one result object per input line_no; do not omit any line. "
             "Each result must include: line_no (int), meter_name (string), confidence (0..1 number), "
@@ -190,6 +201,7 @@ class LLMRefiner:
         timeout_ms: int,
         temperature: float,
         eval_mode: str = "production",
+        context: Optional[Dict[str, object]] = None,
     ) -> Dict[int, LLMRefinement]:
         if not baselines:
             return {}
@@ -224,6 +236,12 @@ class LLMRefiner:
                     "baseline_confidence": float(b.confidence),
                 }
             )
+        context = context if isinstance(context, dict) else {}
+        dominant_meter = str(context.get("dominant_meter") or "").strip().lower()
+        dominant_ratio = context.get("dominant_ratio")
+        if not isinstance(dominant_ratio, (int, float)):
+            dominant_ratio = 0.0
+        dominant_ratio = max(0.0, min(1.0, float(dominant_ratio)))
 
         # Scale completion budget with batch size to reduce truncation risk on strict JSON output.
         max_tokens = min(3200, max(900, 220 * len(lines) + 300))
@@ -233,8 +251,21 @@ class LLMRefiner:
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
             "messages": [
-                {"role": "system", "content": self._system_prompt()},
-                {"role": "user", "content": json.dumps({"lines": lines}, ensure_ascii=True)},
+                {"role": "system", "content": self._system_prompt(dominant_meter=dominant_meter, dominant_ratio=dominant_ratio)},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "context": {
+                                "dominant_meter": dominant_meter,
+                                "dominant_ratio": dominant_ratio,
+                                "schema_note": "Return one JSON result per input line_no; no omissions.",
+                            },
+                            "lines": lines,
+                        },
+                        ensure_ascii=True,
+                    ),
+                },
             ],
         }
         req = urllib.request.Request(
@@ -401,7 +432,13 @@ class LLMRefiner:
             missing = [b for b in baselines if int(b.line_no) not in out]
             for b in missing:
                 try:
-                    single = self.refine_lines([b], timeout_ms=timeout_ms, temperature=temperature, eval_mode=mode)
+                    single = self.refine_lines(
+                        [b],
+                        timeout_ms=timeout_ms,
+                        temperature=temperature,
+                        eval_mode=mode,
+                        context=context,
+                    )
                     if int(b.line_no) in single:
                         out[int(b.line_no)] = single[int(b.line_no)]
                 except Exception:

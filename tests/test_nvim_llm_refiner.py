@@ -279,3 +279,43 @@ class NvimLLMRefinerTests(unittest.TestCase):
         self.assertEqual(out[3].token_patterns, ["US", "S"])
         self.assertGreater(out[3].token_repairs_applied, 0)
         self.assertFalse(out[3].strict_eval)
+
+    def test_prompt_includes_dominant_meter_context(self) -> None:
+        baselines = [_baseline(13, "To strive to seek")]
+        captured = {}
+        content = json.dumps(
+            {
+                "results": [
+                    {
+                        "line_no": 13,
+                        "meter_name": "iambic dimeter",
+                        "confidence": 0.84,
+                        "analysis_hint": "ctx",
+                        "token_stress_patterns": ["U", "S", "U", "S"],
+                    }
+                ]
+            },
+            ensure_ascii=True,
+        )
+        response = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=True)
+
+        def _fake_urlopen(req, timeout=None):
+            captured["payload"] = json.loads((req.data or b"{}").decode("utf-8"))
+            return _Resp(response)
+
+        with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+            ref = LLMRefiner(endpoint="http://mock", model="mock")
+            out = ref.refine_lines(
+                baselines,
+                timeout_ms=1000,
+                temperature=0.1,
+                context={"dominant_meter": "iambic pentameter", "dominant_ratio": 0.83},
+            )
+        self.assertIn(13, out)
+        payload = captured.get("payload") or {}
+        messages = payload.get("messages") or []
+        self.assertGreaterEqual(len(messages), 2)
+        system_text = str((messages[0] or {}).get("content") or "")
+        self.assertIn("dominant meter is 'iambic pentameter'", system_text)
+        user_obj = json.loads(str((messages[1] or {}).get("content") or "{}"))
+        self.assertEqual((user_obj.get("context") or {}).get("dominant_meter"), "iambic pentameter")

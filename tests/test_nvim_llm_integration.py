@@ -19,6 +19,16 @@ from tests.test_nvim_sonnet18_accuracy import SONNET_18_GOLD  # noqa: E402
 from tests.test_nvim_shakespeare_accuracy import SONNET_116, SONNET_130  # noqa: E402
 from tests.test_nvim_broad_corpora import MILTON_ON_HIS_BLINDNESS, WHITMAN_SONG_OF_MYSELF_OPENING  # noqa: E402
 
+KNOWN_REGRESSION_LINES = [
+    "Nor shall Death brag thou wander'st in his shade,",
+    "Let me not to the marriage of true minds",
+    "Which alters when it alteration finds,",
+    "If snow be white, why then her breasts are dun;",
+    "If hairs be wires, black wires grow on her head.",
+    "And in some perfumes is there more delight",
+    "Lodged with me useless, though my Soul more bent",
+]
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
@@ -132,17 +142,28 @@ class NvimLLMIntegrationTests(unittest.TestCase):
 
     def test_sonnet18_llm_accuracy_floor(self) -> None:
         lines = [{"lnum": i, "text": row["text"]} for i, row in enumerate(SONNET_18_GOLD)]
-        self._assert_iambic_accuracy("sonnet18", lines, floor=0.90, eval_mode="production")
+        self._assert_iambic_accuracy("sonnet18", lines, floor=0.92, eval_mode="production")
 
     def test_shakespeare_llm_accuracy_floors(self) -> None:
         lines_116 = [{"lnum": i, "text": row} for i, row in enumerate(SONNET_116)]
         lines_130 = [{"lnum": i, "text": row} for i, row in enumerate(SONNET_130)]
-        self._assert_iambic_accuracy("sonnet116", lines_116, floor=0.82, eval_mode="production")
-        self._assert_iambic_accuracy("sonnet130", lines_130, floor=0.78, eval_mode="production")
+        self._assert_iambic_accuracy("sonnet116", lines_116, floor=0.85, eval_mode="production")
+        self._assert_iambic_accuracy("sonnet130", lines_130, floor=0.80, eval_mode="production")
 
     def test_milton_llm_accuracy_floor(self) -> None:
         lines = [{"lnum": i, "text": row} for i, row in enumerate(MILTON_ON_HIS_BLINDNESS)]
-        self._assert_iambic_accuracy("milton", lines, floor=0.85, eval_mode="production")
+        self._assert_iambic_accuracy("milton", lines, floor=0.90, eval_mode="production")
+
+    def test_known_regression_lines_floor(self) -> None:
+        lines = [{"lnum": i, "text": row} for i, row in enumerate(KNOWN_REGRESSION_LINES)]
+        collected = self._assert_iambic_accuracy("known-lines", lines, floor=0.85, eval_mode="production")
+        by_lnum = collected["results"]
+        self.assertGreaterEqual(len(by_lnum), len(lines))
+        for i in range(len(lines)):
+            got = by_lnum.get(i)
+            self.assertIsNotNone(got, "missing known-line result for line {}".format(i + 1))
+            best_meter = str((got or {}).get("pattern_best_meter", "")).strip().lower()
+            self.assertIn(best_meter, {"", "iambic pentameter"})
 
     def test_whitman_llm_not_overcollapsed(self) -> None:
         lines = [{"lnum": i, "text": row} for i, row in enumerate(WHITMAN_SONG_OF_MYSELF_OPENING)]
