@@ -209,6 +209,7 @@ The repository uses a layered regression strategy:
   - Non-Shakespeare formal sonnet benchmark (Milton) with iambic-pentameter floor.
   - Free-verse behavior guard (Whitman) to avoid over-collapsing to a single meter class.
   - Targeted known-regression lines (Shakespeare + Milton) to protect specific historical failure cases.
+    - Currently skipped due to `pattern_best_meter` instability across local models.
 
 - Cache/scheduling regressions
   - Duplicate-line correctness: repeated identical lines must annotate on every row.
