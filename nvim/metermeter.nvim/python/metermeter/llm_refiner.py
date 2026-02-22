@@ -10,6 +10,15 @@ from .meter_engine import LineAnalysis
 
 WORD_RE = re.compile(r"^[A-Za-z]+(?:'[A-Za-z]+)?$")
 STRESS_RE = re.compile(r"^[US]+$")
+VALID_FEET = {
+    "monometer": 1,
+    "dimeter": 2,
+    "trimeter": 3,
+    "tetrameter": 4,
+    "pentameter": 5,
+    "hexameter": 6,
+}
+LINE_NAME_BY_FEET = {v: k for k, v in VALID_FEET.items()}
 
 
 @dataclass
@@ -69,11 +78,55 @@ class LLMRefiner:
         return (
             "You are an expert in English poetic meter and scansion. "
             "Analyze stress at the whole-line level, not per-word dictionary stress in isolation. "
-            "Return ONLY JSON: {results:[...]}. "
-            "Each result must include: line_no, meter_name, confidence, analysis_hint, token_stress_patterns. "
-            "token_stress_patterns must be a list of U/S strings, one per token, and lengths must match token_syllables. "
-            "confidence is 0..1, analysis_hint <= 220 chars."
+            "Return ONLY strict JSON with this exact top-level shape: {\"results\":[...]}. "
+            "Return exactly one result object per input line_no; do not omit any line. "
+            "Each result must include: line_no (int), meter_name (string), confidence (0..1 number), "
+            "analysis_hint (<=220 chars), token_stress_patterns (list of strings). "
+            "token_stress_patterns length must equal token count, and each token pattern must contain only U/S "
+            "with exact length equal to token_syllables for that token. "
+            "Use canonical meter names when possible, e.g. 'iambic pentameter', "
+            "'trochaic tetrameter', 'anapestic trimeter', 'dactylic hexameter'. "
+            "No prose outside JSON."
         )
+
+    def _canonical_meter_name(self, raw: str, base: LineAnalysis) -> str:
+        s = " ".join((raw or "").strip().lower().split())
+        if not s:
+            return ""
+        s = s.replace("iambs", "iambic")
+        s = s.replace("trochees", "trochaic")
+        s = s.replace("anapests", "anapestic")
+        s = s.replace("dactyls", "dactylic")
+
+        syllables = sum(len(p) for p in (base.token_patterns or []))
+        if syllables <= 0:
+            syllables = 10
+
+        m = re.search(r"\b(iambic|trochaic|anapestic|dactylic)\b", s)
+        if not m:
+            return s
+        foot_name = m.group(1)
+
+        m2 = re.search(r"\b(monometer|dimeter|trimeter|tetrameter|pentameter|hexameter)\b", s)
+        if m2:
+            feet_name = m2.group(1)
+            if foot_name == "iambic" and 9 <= syllables <= 11:
+                feet_name = "pentameter"
+            return "{} {}".format(foot_name, feet_name)
+
+        m3 = re.search(r"\b([1-6])\s*[- ]*foot\b", s)
+        if m3:
+            feet = int(m3.group(1))
+            if foot_name == "iambic" and 9 <= syllables <= 11:
+                feet = 5
+            return "{} {}".format(foot_name, LINE_NAME_BY_FEET.get(feet, "pentameter"))
+
+        unit = 3 if foot_name in {"anapestic", "dactylic"} else 2
+        feet = int(round(float(syllables) / float(unit)))
+        feet = max(1, min(6, feet))
+        if foot_name == "iambic" and 9 <= syllables <= 11:
+            feet = 5
+        return "{} {}".format(foot_name, LINE_NAME_BY_FEET.get(feet, "pentameter"))
 
     def _debug_path(self) -> str:
         path = os.environ.get("METERMETER_LLM_DEBUG_PATH", "").strip()
@@ -96,6 +149,27 @@ class LLMRefiner:
         except Exception:
             return ""
         return path
+
+    def _normalize_token_pattern(self, raw_pat: str, expected_len: int, baseline_pat: str) -> str:
+        p = (raw_pat or "").strip().upper()
+        if p:
+            # Some models emit separators like "U.S" or "S-U"; keep only stress symbols.
+            p = "".join(ch for ch in p if ch in {"U", "S"})
+        if expected_len <= 0:
+            return ""
+        if not p or not STRESS_RE.match(p):
+            return ""
+        if len(p) == expected_len:
+            return p
+        # Practical repair: many models return per-token U/S rather than per-syllable.
+        # Use baseline syllable scaffold for length correction while preserving valid stress alphabet.
+        if baseline_pat and len(baseline_pat) == expected_len and STRESS_RE.match(baseline_pat):
+            return baseline_pat
+        if len(p) == 1:
+            if p == "S":
+                return ("U" * max(0, expected_len - 1)) + "S"
+            return "U" * expected_len
+        return ""
 
     def refine_lines(
         self,
@@ -137,6 +211,7 @@ class LLMRefiner:
             "model": self.model,
             "temperature": max(0.0, min(1.0, float(temperature))),
             "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": self._system_prompt()},
                 {"role": "user", "content": json.dumps({"lines": lines}, ensure_ascii=True)},
@@ -227,7 +302,7 @@ class LLMRefiner:
             meter_name = item.get("meter_name") or item.get("final_meter") or ""
             if not isinstance(meter_name, str) or not meter_name.strip():
                 continue
-            meter_name = meter_name.strip().lower()
+            meter_name = self._canonical_meter_name(meter_name, base)
 
             conf = item.get("confidence") or item.get("meter_confidence")
             if not isinstance(conf, (int, float)):
@@ -240,19 +315,31 @@ class LLMRefiner:
             hint = " ".join(hint.split())[:220]
 
             token_patterns = item.get("token_stress_patterns") or item.get("token_patterns") or []
-            if not isinstance(token_patterns, list) or len(token_patterns) != len(base.tokens):
+            if not isinstance(token_patterns, list):
                 continue
+            if len(token_patterns) > len(base.tokens):
+                token_patterns = token_patterns[: len(base.tokens)]
+            elif len(token_patterns) < len(base.tokens):
+                for i in range(len(token_patterns), len(base.tokens)):
+                    fallback = base.token_patterns[i] if i < len(base.token_patterns) else "U"
+                    token_patterns.append(fallback)
             normalized: List[str] = []
+            token_syllables = [len(p) for p in (base.token_patterns or [])]
+            if len(token_syllables) != len(base.tokens):
+                token_syllables = [1 for _ in base.tokens]
+            if len(token_syllables) != len(token_patterns):
+                continue
             ok = True
-            for p in token_patterns:
+            for i, p in enumerate(token_patterns):
                 if not isinstance(p, str):
                     ok = False
                     break
-                p = p.strip().upper()
-                if not p or not STRESS_RE.match(p):
+                baseline_pat = base.token_patterns[i] if i < len(base.token_patterns) else ""
+                norm = self._normalize_token_pattern(p, int(token_syllables[i]), baseline_pat)
+                if not norm:
                     ok = False
                     break
-                normalized.append(p)
+                normalized.append(norm)
             if not ok or len(normalized) != len(base.tokens):
                 continue
 

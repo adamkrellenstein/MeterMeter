@@ -228,7 +228,9 @@ export METERMETER_LLM_MODEL="qwen2.5:7b-instruct"
 ```
 
 `tests/test_nvim_llm_integration.py` is intentionally skipped unless `METERMETER_LLM_INTEGRATION=1`.
-It validates strict LLM-mode output and enforces a Sonnet 18 iambic-pentameter accuracy floor.
+It validates strict LLM-mode output and enforces real-model accuracy floors on:
+- Sonnet 18 (iambic pentameter)
+- Milton, *On His Blindness* (iambic pentameter)
 
 ## Performance Model
 

@@ -168,3 +168,49 @@ class NvimLLMRefinerTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
         http_err.close()
+
+    def test_meter_name_normalization_from_iambs(self) -> None:
+        baselines = [_baseline(9, "To strive to seek")]
+        content = json.dumps(
+            {
+                "results": [
+                    {
+                        "line_no": 9,
+                        "meter_name": "iambs",
+                        "confidence": 0.8,
+                        "analysis_hint": "norm",
+                        "token_stress_patterns": ["U", "S", "U", "S"],
+                    }
+                ]
+            },
+            ensure_ascii=True,
+        )
+        response = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=True)
+        with patch("urllib.request.urlopen", return_value=_Resp(response)):
+            ref = LLMRefiner(endpoint="http://mock", model="mock")
+            out = ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
+        self.assertIn(9, out)
+        self.assertEqual(out[9].meter_name, "iambic dimeter")
+
+    def test_repairs_token_pattern_syllable_length_mismatch(self) -> None:
+        baselines = [_baseline(12, "To strive to seek")]
+        content = json.dumps(
+            {
+                "results": [
+                    {
+                        "line_no": 12,
+                        "meter_name": "iambic dimeter",
+                        "confidence": 0.8,
+                        "analysis_hint": "bad",
+                        "token_stress_patterns": ["UU", "S", "U", "S"],
+                    }
+                ]
+            },
+            ensure_ascii=True,
+        )
+        response = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=True)
+        with patch("urllib.request.urlopen", return_value=_Resp(response)):
+            ref = LLMRefiner(endpoint="http://mock", model="mock")
+            out = ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
+        self.assertIn(12, out)
+        self.assertEqual(out[12].token_patterns, baselines[0].token_patterns)
