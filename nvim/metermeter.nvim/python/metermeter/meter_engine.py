@@ -43,7 +43,6 @@ BUILTIN_WORD_PATTERNS: Dict[str, List[str]] = {
     "darling": ["SU"],
     "summer": ["SU"],
     "sometime": ["SU"],
-    "heaven": ["SU"],
     "marriage": ["SU"],
     "admit": ["US"],
     "impediments": ["USUU", "USU"],

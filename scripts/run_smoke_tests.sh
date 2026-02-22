@@ -14,5 +14,6 @@ python3 -m unittest -q \
   tests.test_nvim_cli_llm \
   tests.test_nvim_stress_spans \
   tests.test_nvim_sonnet18_accuracy \
-  tests.test_nvim_shakespeare_accuracy
+  tests.test_nvim_shakespeare_accuracy \
+  tests.test_nvim_broad_corpora
 echo "[smoke] ok"

@@ -6,13 +6,15 @@ local ns = vim.api.nvim_create_namespace("metermeter")
 
 local DEFAULTS = {
   debounce_ms = 80,
-  rescan_interval_ms = 1000,
+  rescan_interval_ms = 0,
   prefetch_lines = 5, -- also scan around cursor, not only visible lines
 
   ui = {
     stress = true,
     meter_hints = true,
     meter_hint_confidence_levels = 6, -- number of discrete tint steps (>= 2)
+    show_analysis_hint = false,
+    analysis_hint_mode = "off", -- off|inline
   },
 
   -- If true, only annotate lines that end with a trailing "\" (useful for mixed-format files).
@@ -28,6 +30,12 @@ local DEFAULTS = {
     temperature = 0.1,
     max_lines_per_scan = 2,
     hide_non_refined = false,
+    failure_threshold = 3,
+    cooldown_ms = 15000,
+  },
+
+  cache = {
+    max_entries = 5000,
   },
 
   debug_dump_path = "/tmp/metermeter_nvim_dump.json",
@@ -39,6 +47,14 @@ local state_by_buf = {}
 local ENGINE_VISIBLE_CHUNK = 12
 local ENGINE_PREFETCH_CHUNK = 20
 local run_cli
+
+local function _cache_max_entries()
+  local n = tonumber(cfg.cache and cfg.cache.max_entries) or 5000
+  if n < 100 then
+    n = 100
+  end
+  return math.floor(n)
+end
 
 local function plugin_root()
   local src = debug.getinfo(1, "S").source
@@ -82,6 +98,14 @@ local function should_enable(bufnr)
   -- Modeline-friendly: user can opt-in via filetype.
   -- Example modeline: `vim: set ft=typst.metermeter :`
   return has_ft_token(bufnr, "metermeter")
+end
+
+local function should_run_for_buf(bufnr)
+  local st = state_by_buf[bufnr]
+  if st and st.user_enabled ~= nil then
+    return st.user_enabled and true or false
+  end
+  return should_enable(bufnr)
 end
 
 local function compute_stress_hl()
@@ -293,6 +317,32 @@ local function candidate_line_set_for_buf(bufnr)
   return visible_lines, prefetch_lines
 end
 
+local function viewport_signature(bufnr)
+  local wins = vim.fn.win_findbuf(bufnr)
+  if type(wins) ~= "table" or #wins == 0 then
+    return "no-win"
+  end
+  local parts = {}
+  for _, win in ipairs(wins) do
+    win = tonumber(win) or win
+    if type(win) == "number" and vim.api.nvim_win_is_valid(win) then
+      local w0, w1 = vim.api.nvim_win_call(win, function()
+        return vim.fn.line("w0"), vim.fn.line("w$")
+      end)
+      local cur = vim.api.nvim_win_get_cursor(win)
+      local ww = vim.api.nvim_win_get_width(win)
+      table.insert(parts, table.concat({
+        tostring(w0),
+        tostring(w1),
+        tostring(cur and cur[1] or 0),
+        tostring(ww or 0),
+      }, ":"))
+    end
+  end
+  table.sort(parts)
+  return table.concat(parts, "|")
+end
+
 local function combine_lines(visible_lines, prefetch_lines)
   local out = {}
   local seen = {}
@@ -352,15 +402,102 @@ local function ensure_state(bufnr)
   end
   st = {
     enabled = false,
+    user_enabled = nil, -- nil => auto by filetype, bool => explicit buffer override
     timer = nil,
     tick = nil,
     cache = {},
+    cache_size = 0,
+    cache_seq = 0,
     scan_generation = 0,
     scan_running = false,
     scan_changedtick = -1,
+    last_changedtick = -1,
+    last_view_sig = "",
+    last_render_sig = "",
+    last_llm_changedtick = -1,
+    last_llm_view_sig = "",
+    llm_fail_count = 0,
+    llm_cooldown_until = 0,
+    debug_scan_count = 0,
+    debug_cli_count = 0,
+    debug_llm_cli_count = 0,
+    debug_apply_count = 0,
   }
   state_by_buf[bufnr] = st
   return st
+end
+
+local function _cache_touch(st, entry)
+  st.cache_seq = (tonumber(st.cache_seq) or 0) + 1
+  entry.at = st.cache_seq
+end
+
+local function _cache_get(st, key)
+  local entry = st.cache[key]
+  if not entry then
+    return nil
+  end
+  _cache_touch(st, entry)
+  return entry.payload
+end
+
+local function _cache_put(st, key, payload)
+  local entry = st.cache[key]
+  if not entry then
+    entry = { payload = payload, at = 0 }
+    st.cache[key] = entry
+    st.cache_size = (tonumber(st.cache_size) or 0) + 1
+  else
+    entry.payload = payload
+  end
+  _cache_touch(st, entry)
+
+  local max_entries = _cache_max_entries()
+  while (tonumber(st.cache_size) or 0) > max_entries do
+    local oldest_key = nil
+    local oldest_at = nil
+    for k, v in pairs(st.cache) do
+      local at = tonumber(v and v.at) or 0
+      if oldest_at == nil or at < oldest_at then
+        oldest_at = at
+        oldest_key = k
+      end
+    end
+    if oldest_key == nil then
+      break
+    end
+    st.cache[oldest_key] = nil
+    st.cache_size = math.max(0, (tonumber(st.cache_size) or 1) - 1)
+  end
+end
+
+local function _cache_key_for_text(text)
+  return cfg.llm.model .. "\n" .. tostring(cfg.llm.endpoint or "") .. "\n" .. text
+end
+
+local function _llm_in_cooldown(st)
+  local now = uv.now()
+  return now < (tonumber(st.llm_cooldown_until) or 0)
+end
+
+local function _llm_record_failure(st)
+  st.llm_fail_count = (tonumber(st.llm_fail_count) or 0) + 1
+  local threshold = tonumber(cfg.llm and cfg.llm.failure_threshold) or 3
+  if threshold < 1 then
+    threshold = 1
+  end
+  if st.llm_fail_count >= threshold then
+    local cool = tonumber(cfg.llm and cfg.llm.cooldown_ms) or 15000
+    if cool < 0 then
+      cool = 0
+    end
+    st.llm_cooldown_until = uv.now() + cool
+    st.llm_fail_count = 0
+  end
+end
+
+local function _llm_record_success(st)
+  st.llm_fail_count = 0
 end
 
 local function clear_buf(bufnr)
@@ -421,10 +558,19 @@ local function apply_results(bufnr, results)
         label = ""
         hint = ""
       end
-      if cfg.ui.meter_hints and label ~= "" then
+      local show_hint = cfg.ui.show_analysis_hint and hint ~= ""
+      local hint_mode = tostring(cfg.ui.analysis_hint_mode or "off")
+      if cfg.ui.meter_hints and (label ~= "" or (show_hint and hint_mode == "inline")) then
         local hl = eol_hl_for_conf(conf)
+        local vt = {}
+        if label ~= "" then
+          table.insert(vt, { " " .. label, hl })
+        end
+        if show_hint and hint_mode == "inline" then
+          table.insert(vt, { "  " .. hint, "Comment" })
+        end
         vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, 0, {
-          virt_text = { { " " .. label, hl } },
+          virt_text = vt,
           -- Left-aligned, but starting in a consistent column across all annotated lines.
           virt_text_pos = "overlay",
           virt_text_win_col = eol_col,
@@ -460,6 +606,25 @@ local function apply_results(bufnr, results)
   end
 end
 
+local function render_signature(results)
+  local ok, encoded = pcall(json_encode, results or {})
+  if ok and type(encoded) == "string" then
+    return encoded
+  end
+  return tostring(results and #results or 0)
+end
+
+local function maybe_apply_results(bufnr, results)
+  local st = ensure_state(bufnr)
+  local sig = render_signature(results)
+  if sig == (st.last_render_sig or "") then
+    return
+  end
+  st.last_render_sig = sig
+  st.debug_apply_count = (tonumber(st.debug_apply_count) or 0) + 1
+  apply_results(bufnr, results)
+end
+
 local function build_request(bufnr, ordered_lines, llm_enabled_override, require_llm_source)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
 
@@ -473,8 +638,8 @@ local function build_request(bufnr, ordered_lines, llm_enabled_override, require
       if ok and not is_scan_line(bufnr, text) then
         ok = false
       end
-      local key = cfg.llm.model .. "\n" .. tostring(cfg.llm.endpoint or "") .. "\n" .. text
-      local cached = st.cache[key]
+      local key = _cache_key_for_text(text)
+      local cached = _cache_get(st, key)
       if ok and cached then
         if not require_llm_source then
           ok = false
@@ -508,8 +673,16 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
   end
   for _, item in ipairs(resp.results) do
     if type(item) == "table" and type(item.text) == "string" then
-      local key = cfg.llm.model .. "\n" .. tostring(cfg.llm.endpoint or "") .. "\n" .. item.text
-      st.cache[key] = item
+      local key = _cache_key_for_text(item.text)
+      _cache_put(st, key, {
+        text = item.text,
+        meter_name = item.meter_name or "",
+        confidence = item.confidence,
+        source = item.source or "engine",
+        hint = item.hint or "",
+        token_patterns = item.token_patterns or {},
+        stress_spans = item.stress_spans or {},
+      })
     end
   end
   -- Return results for current visible lines from cache.
@@ -524,10 +697,19 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
     if lnum >= 0 and lnum < line_count then
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
       if is_scan_line(bufnr, text) then
-        local key = cfg.llm.model .. "\n" .. tostring(cfg.llm.endpoint or "") .. "\n" .. text
-        local cached = st.cache[key]
+        local key = _cache_key_for_text(text)
+        local cached = _cache_get(st, key)
         if cached then
-          table.insert(out, cached)
+          table.insert(out, {
+            lnum = lnum,
+            text = text,
+            meter_name = cached.meter_name or "",
+            confidence = cached.confidence,
+            source = cached.source or "engine",
+            hint = cached.hint or "",
+            token_patterns = cached.token_patterns or {},
+            stress_spans = cached.stress_spans or {},
+          })
         end
       end
     end
@@ -581,14 +763,23 @@ local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chun
       return
     end
 
+    st.debug_cli_count = (tonumber(st.debug_cli_count) or 0) + 1
+    if llm_enabled then
+      st.debug_llm_cli_count = (tonumber(st.debug_llm_cli_count) or 0) + 1
+    end
     run_cli(req, function(resp, err)
       local st2 = ensure_state(bufnr)
       if not vim.api.nvim_buf_is_valid(bufnr) or not st2.enabled or st2.scan_generation ~= scan_generation then
         return
       end
       if not err and resp then
+        if llm_enabled then
+          _llm_record_success(st2)
+        end
         local results = merge_cache_and_results(bufnr, resp, render_lines)
-        apply_results(bufnr, results)
+        maybe_apply_results(bufnr, results)
+      elseif err and llm_enabled then
+        _llm_record_failure(st2)
       end
       step()
     end)
@@ -625,17 +816,24 @@ local function do_scan(bufnr)
   if not st.enabled then
     return
   end
-  if not should_enable(bufnr) then
+  if not should_run_for_buf(bufnr) then
     return
   end
 
   local changedtick = tonumber(vim.api.nvim_buf_get_changedtick(bufnr)) or 0
+  local view_sig = viewport_signature(bufnr)
+  if (not st.scan_running) and st.last_changedtick == changedtick and st.last_view_sig == view_sig then
+    return
+  end
   if st.scan_running and st.scan_changedtick == changedtick then
     return
   end
 
   st.scan_running = true
+  st.debug_scan_count = (tonumber(st.debug_scan_count) or 0) + 1
   st.scan_changedtick = changedtick
+  st.last_changedtick = changedtick
+  st.last_view_sig = view_sig
   st.scan_generation = (tonumber(st.scan_generation) or 0) + 1
   local gen = st.scan_generation
 
@@ -647,7 +845,7 @@ local function do_scan(bufnr)
 
   -- Render cached results immediately to avoid blank states during async work.
   local cached_results = merge_cache_and_results(bufnr, { results = {} }, render_lines)
-  apply_results(bufnr, cached_results)
+  maybe_apply_results(bufnr, cached_results)
   if #all_scan_lines == 0 then
     st.scan_running = false
     return
@@ -657,6 +855,7 @@ local function do_scan(bufnr)
   if llm_batch < 1 then
     llm_batch = 1
   end
+  local llm_needs_refresh = (st.last_llm_changedtick ~= changedtick) or (st.last_llm_view_sig ~= view_sig)
 
   local function finish_scan()
     local st2 = ensure_state(bufnr)
@@ -668,13 +867,20 @@ local function do_scan(bufnr)
   run_chunk_phase(bufnr, gen, render_lines, visible_lines, ENGINE_VISIBLE_CHUNK, false, false, function()
     run_chunk_phase(bufnr, gen, render_lines, prefetch_lines, ENGINE_PREFETCH_CHUNK, false, false, function()
       run_chunk_phase(bufnr, gen, render_lines, background_lines, ENGINE_PREFETCH_CHUNK, false, false, function()
-        if not cfg.llm.enabled then
+        if (not cfg.llm.enabled) or _llm_in_cooldown(st) or (not llm_needs_refresh) then
           finish_scan()
           return
         end
         run_chunk_phase(bufnr, gen, render_lines, visible_lines, llm_batch, true, true, function()
           run_chunk_phase(bufnr, gen, render_lines, prefetch_lines, llm_batch, true, true, function()
-            run_chunk_phase(bufnr, gen, render_lines, background_lines, llm_batch, true, true, finish_scan)
+            run_chunk_phase(bufnr, gen, render_lines, background_lines, llm_batch, true, true, function()
+              local st3 = ensure_state(bufnr)
+              if st3.scan_generation == gen then
+                st3.last_llm_changedtick = changedtick
+                st3.last_llm_view_sig = view_sig
+              end
+              finish_scan()
+            end)
           end)
         end)
       end)
@@ -685,6 +891,28 @@ end
 local function stop_scan_state(st)
   st.scan_running = false
   st.scan_changedtick = -1
+  st.last_changedtick = -1
+  st.last_view_sig = ""
+end
+
+local function cleanup_buf(bufnr)
+  local st = state_by_buf[bufnr]
+  if not st then
+    return
+  end
+  stop_scan_state(st)
+  if st.timer then
+    st.timer:stop()
+    st.timer:close()
+    st.timer = nil
+  end
+  if st.tick then
+    st.tick:stop()
+    st.tick:close()
+    st.tick = nil
+  end
+  clear_buf(bufnr)
+  state_by_buf[bufnr] = nil
 end
 
 local function start_scan(bufnr)
@@ -728,6 +956,8 @@ function M.enable(bufnr)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
   st.enabled = true
+  st.last_changedtick = -1
+  st.last_view_sig = ""
   ensure_tick(bufnr)
   schedule_scan(bufnr)
 end
@@ -753,11 +983,45 @@ end
 function M.toggle(bufnr)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
-  if st.enabled then
-    M.disable(bufnr)
-  else
+  local next_enabled = not should_run_for_buf(bufnr)
+  st.user_enabled = next_enabled
+  if next_enabled then
     M.enable(bufnr)
+  else
+    M.disable(bufnr)
   end
+end
+
+function M.status(bufnr)
+  bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
+  local st = ensure_state(bufnr)
+  local auto = should_enable(bufnr)
+  local effective = should_run_for_buf(bufnr)
+  local override = st.user_enabled
+  local cool_ms = math.max(0, (tonumber(st.llm_cooldown_until) or 0) - uv.now())
+  local msg = string.format(
+    "MeterMeter status: enabled=%s effective=%s auto=%s override=%s llm_cooldown_ms=%d llm_calls=%d",
+    tostring(st.enabled),
+    tostring(effective),
+    tostring(auto),
+    tostring(override),
+    math.floor(cool_ms),
+    tonumber(st.debug_llm_cli_count) or 0
+  )
+  vim.notify(msg, vim.log.levels.INFO)
+end
+
+function M._debug_stats(bufnr)
+  bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
+  local st = ensure_state(bufnr)
+  return {
+    scan_count = tonumber(st.debug_scan_count) or 0,
+    cli_count = tonumber(st.debug_cli_count) or 0,
+    llm_cli_count = tonumber(st.debug_llm_cli_count) or 0,
+    apply_count = tonumber(st.debug_apply_count) or 0,
+    enabled = st.enabled and true or false,
+    scan_running = st.scan_running and true or false,
+  }
 end
 
 function M.rescan(bufnr)
@@ -807,12 +1071,25 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile", "BufEnter" }, {
     group = group,
     callback = function(args)
-      if should_enable(args.buf) then
+      if should_run_for_buf(args.buf) then
         M.enable(args.buf)
       end
     end,
   })
-  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "WinScrolled", "CursorHold" }, {
+  vim.api.nvim_create_autocmd("FileType", {
+    group = group,
+    callback = function(args)
+      if should_run_for_buf(args.buf) then
+        M.enable(args.buf)
+      else
+        local st = state_by_buf[args.buf]
+        if st and st.enabled then
+          M.disable(args.buf)
+        end
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "WinScrolled" }, {
     group = group,
     callback = function(args)
       local st = ensure_state(args.buf)
@@ -821,6 +1098,20 @@ function M.setup(opts)
       end
     end,
   })
+  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+    group = group,
+    callback = function(args)
+      cleanup_buf(args.buf)
+    end,
+  })
+
+  -- Initial bootstrap: if setup runs after files are already open, ensure those buffers are
+  -- enabled/scanned without requiring a manual rescan.
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) and should_run_for_buf(bufnr) then
+      M.enable(bufnr)
+    end
+  end
 end
 
 return M

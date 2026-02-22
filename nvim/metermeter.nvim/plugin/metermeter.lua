@@ -18,3 +18,7 @@ end, {})
 vim.api.nvim_create_user_command("MeterMeterDump", function()
   require("metermeter").dump_debug(0)
 end, {})
+
+vim.api.nvim_create_user_command("MeterMeterStatus", function()
+  require("metermeter").status(0)
+end, {})

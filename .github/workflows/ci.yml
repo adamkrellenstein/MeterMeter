@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - neovim
+  pull_request:
+
+jobs:
+  lint:
+    name: static-checks (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Neovim
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/nvim.tar.gz \
+            https://github.com/neovim/neovim/releases/download/v0.10.2/nvim-linux64.tar.gz
+          tar -C /tmp -xzf /tmp/nvim.tar.gz
+          echo "/tmp/nvim-linux64/bin" >> "$GITHUB_PATH"
+          nvim --version | head -n 1
+
+      - name: Run static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/run_static_checks.sh
+
+  test:
+    name: smoke-and-unit (${{ matrix.os }})
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Neovim (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/nvim.tar.gz \
+            https://github.com/neovim/neovim/releases/download/v0.10.2/nvim-linux64.tar.gz
+          tar -C /tmp -xzf /tmp/nvim.tar.gz
+          echo "/tmp/nvim-linux64/bin" >> "$GITHUB_PATH"
+          nvim --version | head -n 1
+
+      - name: Install Neovim (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew update
+          brew install neovim
+          nvim --version | head -n 1
+
+      - name: Run smoke + unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/run_smoke_tests.sh
