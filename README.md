@@ -162,6 +162,7 @@ require("metermeter").setup({ ... })
 | `ui.stress` | `true` | Enables stress span highlighting. | Allows turning off visual emphasis if user only wants meter labels. |
 | `ui.meter_hints` | `true` | Shows meter annotations at line end. | Supports a cleaner “highlights only” mode when false. |
 | `ui.meter_hint_confidence_levels` | `6` | Number of confidence tint steps for EOL meter text. | Balances subtle confidence signaling vs. visual noise. |
+| `ui.show_error_hint` | `true` | Shows a small inline error hint when LLM fails. | Makes LLM failures visible without checking `:MeterMeterStatus`. |
 | `require_trailing_backslash` | `false` | If true, only scans lines ending with `\`. | Useful for mixed prose/code documents where only explicit poem lines should be scanned. |
 | `llm.enabled` | `true` | Enables meter analysis pipeline. Must stay `true` for annotations. | Meter output is LLM-required. |
 | `llm.endpoint` | `http://127.0.0.1:11434/v1/chat/completions` | OpenAI-compatible chat endpoint. | Supports local Ollama and compatible providers uniformly. |
@@ -169,6 +170,7 @@ require("metermeter").setup({ ... })
 | `llm.timeout_ms` | `30000` | HTTP timeout for LLM calls. | Prevents scanner stalls on slow/unavailable models. |
 | `llm.temperature` | `0.1` | Sampling temperature for refinement requests. | Keeps output mostly deterministic for meter tasks. |
 | `llm.eval_mode` | `"production"` | LLM evaluation mode: `production` or `strict`. | `strict` disables normalization/repair so tests can measure raw model quality. |
+| `llm.max_concurrent` | `1` | Maximum concurrent LLM requests per scan phase. | Speeds up larger buffers when GPU is available. |
 
 ### Advanced Options
 
@@ -182,6 +184,8 @@ require("metermeter").setup({ ... })
 | `llm.hide_non_refined` | `false` | Retained for compatibility; has no practical effect in strict LLM-only mode. | Keeps settings stable across upgrades. |
 | `llm.failure_threshold` | `3` | Consecutive LLM errors before cooldown kicks in. | Prevents repeated failing requests from thrashing the editor. |
 | `llm.cooldown_ms` | `15000` | Cooldown duration after hitting failure threshold. | Gives local runtime/endpoints time to recover before retry. |
+| `lexicon_path` | `""` | Optional path to a large word-pattern JSON (or `.json.gz`) lexicon. | Allows full CMUdict-sized vocab without bundling it. |
+| `extra_lexicon_path` | `""` | Optional extra lexicon path to merge on top of base patterns. | Lets you add custom vocabulary without replacing the main lexicon. |
 
 Global toggle:
 
@@ -228,6 +232,7 @@ Run real LLM integration accuracy checks (opt-in):
 
 ```bash
 export METERMETER_LLM_INTEGRATION=1
+export METERMETER_LLM_PROGRESS=1
 export METERMETER_LLM_ENDPOINT="http://127.0.0.1:11434/v1/chat/completions"
 export METERMETER_LLM_MODEL="qwen2.5:7b-instruct"
 ./scripts/run_llm_integration_tests.sh

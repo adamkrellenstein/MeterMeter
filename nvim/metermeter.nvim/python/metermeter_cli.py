@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import gzip
 import json
 import os
 import re
@@ -17,6 +18,34 @@ DOMINANT_RATIO_MIN = 0.75
 DOMINANT_MIN_LINES = 6
 DOMINANT_LOW_CONF = 0.65
 DOMINANT_SCORE_DELTA = 0.08
+
+
+def _load_word_patterns_from_path(path: str) -> Dict[str, List[str]]:
+    path = str(path or "").strip()
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        if path.endswith(".gz"):
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        else:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+    except Exception:
+        return {}
+    out: Dict[str, List[str]] = {}
+    if not isinstance(raw, dict):
+        return out
+    for word, patterns in raw.items():
+        if not isinstance(word, str) or not isinstance(patterns, list):
+            continue
+        clean = []
+        for p in patterns:
+            if isinstance(p, str) and p and set(p).issubset({"U", "S"}):
+                clean.append(p)
+        if clean:
+            out[word.lower()] = clean
+    return out
 
 
 def _even_spans(length: int, target: int) -> List[Tuple[int, int]]:
@@ -150,8 +179,16 @@ def main() -> int:
     config = req.get("config") or {}
     llm_cfg = (config.get("llm") or {}) if isinstance(config, dict) else {}
     context_cfg = (config.get("context") or {}) if isinstance(config, dict) else {}
+    lexicon_path = str(config.get("lexicon_path") or "").strip() if isinstance(config, dict) else ""
+    extra_lexicon_path = str(config.get("extra_lexicon_path") or "").strip() if isinstance(config, dict) else ""
 
-    engine = MeterEngine()
+    engine = MeterEngine(dict_path=lexicon_path or None)
+    if extra_lexicon_path:
+        extra_patterns = _load_word_patterns_from_path(extra_lexicon_path)
+        if extra_patterns:
+            merged = dict(engine.word_patterns)
+            merged.update(extra_patterns)
+            engine = MeterEngine(dict_path=lexicon_path or None, word_patterns=merged)
     analyses: List[LineAnalysis] = []
     for item in lines:
         if not isinstance(item, dict):

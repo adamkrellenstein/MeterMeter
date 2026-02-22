@@ -18,6 +18,7 @@ local DEFAULTS = {
     meter_hint_confidence_levels = 6, -- number of discrete tint steps (>= 2)
     show_analysis_hint = false,
     analysis_hint_mode = "off", -- off|inline
+    show_error_hint = true,
   },
 
   -- If true, only annotate lines that end with a trailing "\" (useful for mixed-format files).
@@ -32,6 +33,7 @@ local DEFAULTS = {
     timeout_ms = 30000,
     temperature = 0.1,
     max_lines_per_scan = 2,
+    max_concurrent = 1,
     hide_non_refined = false,
     failure_threshold = 3,
     cooldown_ms = 15000,
@@ -40,6 +42,9 @@ local DEFAULTS = {
   cache = {
     max_entries = 5000,
   },
+
+  lexicon_path = "",
+  extra_lexicon_path = "",
 
   debug_dump_path = "/tmp/metermeter_nvim_dump.json",
 }
@@ -115,6 +120,7 @@ local function compute_stress_hl()
   -- Bold overlay so it stays visible even when Normal bg is pure black.
   vim.api.nvim_set_hl(0, "MeterMeterStress", { bold = true })
   vim.api.nvim_set_hl(0, "MeterMeterEOL", { link = "Comment" })
+  vim.api.nvim_set_hl(0, "MeterMeterError", { link = "WarningMsg" })
 end
 
 local function _blend_rgb(a, b, t)
@@ -360,8 +366,21 @@ local function _cache_put(st, key, payload)
   end
 end
 
-local function _cache_key_for_text(text)
-  return cfg.llm.model .. "\n" .. tostring(cfg.llm.endpoint or "") .. "\n" .. text
+local function _cache_key_for_text(st, text)
+  local epoch = 0
+  if st and st.cache_epoch then
+    epoch = tonumber(st.cache_epoch) or 0
+  end
+  return table.concat({
+    tostring(cfg.llm.model or ""),
+    tostring(cfg.llm.endpoint or ""),
+    tostring(cfg.llm.eval_mode or ""),
+    tostring(cfg.llm.temperature or ""),
+    tostring(cfg.lexicon_path or ""),
+    tostring(cfg.extra_lexicon_path or ""),
+    tostring(epoch),
+    text,
+  }, "\n")
 end
 
 local function _llm_in_cooldown(st)
@@ -497,6 +516,32 @@ local function apply_results(bufnr, results)
       end
     end
   end
+
+  if cfg.ui.show_error_hint and #results == 0 then
+    local st = ensure_state(bufnr)
+    local msg = tostring(st.llm_error or "")
+    if msg ~= "" then
+      local line_count = vim.api.nvim_buf_line_count(bufnr)
+      if line_count > 0 then
+        local line = 0
+        for i = 0, line_count - 1 do
+          local text = (vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or "")
+          if is_scan_line(bufnr, text) then
+            line = i
+            break
+          end
+        end
+        msg = msg:gsub("%s+", " ")
+        if #msg > 120 then
+          msg = msg:sub(1, 117) .. "..."
+        end
+        vim.api.nvim_buf_set_extmark(bufnr, ns, line, 0, {
+          virt_text = { { " MeterMeter LLM error: " .. msg, "MeterMeterError" } },
+          virt_text_pos = "eol",
+        })
+      end
+    end
+  end
 end
 
 local function maybe_apply_results(bufnr, results)
@@ -520,7 +565,7 @@ local function dominant_context_for_lines(bufnr, line_set)
     if lnum >= 0 and lnum < line_count then
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
       if is_scan_line(bufnr, text) then
-        local key = _cache_key_for_text(text)
+        local key = _cache_key_for_text(st, text)
         local cached = _cache_get(st, key)
         if cached and cached.source == "llm" and type(cached.meter_name) == "string" and cached.meter_name ~= "" then
           local meter = string.lower(vim.trim(cached.meter_name))
@@ -548,6 +593,11 @@ local function dominant_context_for_lines(bufnr, line_set)
     ratio = best_weight / total
   end
 
+  local min_ratio = 0.75
+  local min_lines = 6
+  if best_meter ~= "" and best_meter ~= st.dominant_meter and ratio >= min_ratio and seen >= min_lines then
+    st.cache_epoch = (tonumber(st.cache_epoch) or 0) + 1
+  end
   st.dominant_meter = best_meter
   st.dominant_ratio = ratio
   st.dominant_line_count = seen
@@ -571,7 +621,7 @@ local function build_request(bufnr, ordered_lines, llm_enabled_override, require
       if ok and not is_scan_line(bufnr, text) then
         ok = false
       end
-      local key = _cache_key_for_text(text)
+      local key = _cache_key_for_text(st, text)
       local cached = _cache_get(st, key)
       if ok and cached then
         if not require_llm_source then
@@ -595,6 +645,8 @@ local function build_request(bufnr, ordered_lines, llm_enabled_override, require
     config = {
       llm = llm_cfg,
       context = context or {},
+      lexicon_path = cfg.lexicon_path or "",
+      extra_lexicon_path = cfg.extra_lexicon_path or "",
     },
     lines = lines,
   }
@@ -607,7 +659,7 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
   end
   for _, item in ipairs(resp.results) do
     if type(item) == "table" and type(item.text) == "string" then
-      local key = _cache_key_for_text(item.text)
+      local key = _cache_key_for_text(st, item.text)
       _cache_put(st, key, {
         text = item.text,
         meter_name = item.meter_name or "",
@@ -631,7 +683,7 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
     if lnum >= 0 and lnum < line_count then
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
       if is_scan_line(bufnr, text) then
-        local key = _cache_key_for_text(text)
+        local key = _cache_key_for_text(st, text)
         local cached = _cache_get(st, key)
         if cached then
           if cached.source ~= "llm" then
@@ -661,65 +713,81 @@ end
 local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chunk_size, llm_enabled, require_llm_source, context_fn, on_done)
   local chunks = scanner.chunk_lines(lines or {}, chunk_size)
   local idx = 1
+  local inflight = 0
+  local done = false
+  local max_concurrent = tonumber(cfg.llm and cfg.llm.max_concurrent) or 1
+  if max_concurrent < 1 then
+    max_concurrent = 1
+  end
 
-  local function step()
+  local function finish_if_done()
+    if done then
+      return
+    end
+    if idx > #chunks and inflight == 0 then
+      done = true
+      if on_done then
+        on_done()
+      end
+    end
+  end
+
+  local function launch_next()
     local st = ensure_state(bufnr)
     if not vim.api.nvim_buf_is_valid(bufnr) or not st.enabled or st.scan_generation ~= scan_generation then
       return
     end
-    if idx > #chunks then
-      if on_done then
-        on_done()
+    while inflight < max_concurrent and idx <= #chunks do
+      local context = {}
+      if type(context_fn) == "function" then
+        local ok_ctx, built_ctx = pcall(context_fn)
+        if ok_ctx and type(built_ctx) == "table" then
+          context = built_ctx
+        end
       end
-      return
-    end
+      local req = build_request(bufnr, chunks[idx], llm_enabled, require_llm_source, context)
+      idx = idx + 1
+      if #req.lines == 0 then
+        goto continue
+      end
 
-    local context = {}
-    if type(context_fn) == "function" then
-      local ok_ctx, built_ctx = pcall(context_fn)
-      if ok_ctx and type(built_ctx) == "table" then
-        context = built_ctx
+      st.debug_cli_count = (tonumber(st.debug_cli_count) or 0) + 1
+      if llm_enabled then
+        st.debug_llm_cli_count = (tonumber(st.debug_llm_cli_count) or 0) + 1
       end
-    end
-    local req = build_request(bufnr, chunks[idx], llm_enabled, require_llm_source, context)
-    idx = idx + 1
-    if #req.lines == 0 then
-      step()
-      return
-    end
-
-    st.debug_cli_count = (tonumber(st.debug_cli_count) or 0) + 1
-    if llm_enabled then
-      st.debug_llm_cli_count = (tonumber(st.debug_llm_cli_count) or 0) + 1
-    end
-    run_cli(req, function(resp, err)
-      local st2 = ensure_state(bufnr)
-      if not vim.api.nvim_buf_is_valid(bufnr) or not st2.enabled or st2.scan_generation ~= scan_generation then
-        return
-      end
-      if not err and resp then
-        if type(resp.error) == "string" and resp.error ~= "" then
-          _llm_record_failure(st2, resp.error)
-          maybe_apply_results(bufnr, {})
-          if on_done then
-            on_done()
-          end
+      inflight = inflight + 1
+      run_cli(req, function(resp, err)
+        inflight = inflight - 1
+        local st2 = ensure_state(bufnr)
+        if not vim.api.nvim_buf_is_valid(bufnr) or not st2.enabled or st2.scan_generation ~= scan_generation then
+          finish_if_done()
           return
         end
-        if llm_enabled then
-          _llm_record_success(st2)
+        if not err and resp then
+          if type(resp.error) == "string" and resp.error ~= "" then
+            _llm_record_failure(st2, resp.error)
+            maybe_apply_results(bufnr, {})
+            finish_if_done()
+            return
+          end
+          if llm_enabled then
+            _llm_record_success(st2)
+          end
+          local results = merge_cache_and_results(bufnr, resp, render_lines)
+          maybe_apply_results(bufnr, results)
+        elseif err and llm_enabled then
+          _llm_record_failure(st2, err)
+          maybe_apply_results(bufnr, {})
         end
-        local results = merge_cache_and_results(bufnr, resp, render_lines)
-        maybe_apply_results(bufnr, results)
-      elseif err and llm_enabled then
-        _llm_record_failure(st2, err)
-        maybe_apply_results(bufnr, {})
-      end
-      step()
-    end)
+        launch_next()
+        finish_if_done()
+      end)
+      ::continue::
+    end
+    finish_if_done()
   end
 
-  step()
+  launch_next()
 end
 
 run_cli = function(input, cb)

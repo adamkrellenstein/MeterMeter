@@ -93,13 +93,29 @@ class NvimLLMIntegrationTests(unittest.TestCase):
         }
         batch = int(os.environ.get("METERMETER_LLM_INTEGRATION_BATCH", "2"))
         batch = max(1, batch)
+        progress = _env_bool("METERMETER_LLM_PROGRESS", default=False)
+        total_batches = (len(lines) + batch - 1) // batch
+        batch_idx = 0
         for i in range(0, len(lines), batch):
+            batch_idx += 1
             out = self._run_cli(lines[i : i + batch], eval_mode=eval_mode)
             if out.get("error"):
+                if progress:
+                    print(
+                        "[llm] batch {}/{} error: {}".format(batch_idx, total_batches, out.get("error")),
+                        file=sys.stderr,
+                    )
                 if fail_on_error:
                     self.fail("llm integration error: {}".format(out.get("error")))
                 eval_total["errors"] += 1
                 continue
+            if progress:
+                print(
+                    "[llm] batch {}/{} ok results={}".format(
+                        batch_idx, total_batches, len(out.get("results") or [])
+                    ),
+                    file=sys.stderr,
+                )
             eval_obj = out.get("eval") or {}
             eval_total["line_count"] += int(eval_obj.get("line_count") or 0)
             eval_total["result_count"] += int(eval_obj.get("result_count") or 0)

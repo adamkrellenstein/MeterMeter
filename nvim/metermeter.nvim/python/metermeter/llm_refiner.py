@@ -93,6 +93,7 @@ class LLMRefiner:
             "Use each line's baseline_meter and baseline_confidence as priors; do not deviate unless strong evidence supports it. "
             + dominant_clause
             + "For lines with 9-11 syllables, pentameter is the default unless stress pattern strongly conflicts. "
+            "Do NOT output a single U/S per token; expand each token to match token_syllables exactly. "
             "Return ONLY strict JSON with this exact top-level shape: {\"results\":[...]}. "
             "Return exactly one result object per input line_no; do not omit any line. "
             "Each result must include: line_no (int), meter_name (string), confidence (0..1 number), "

@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import unittest
+import tempfile
 from unittest.mock import patch
 
 
@@ -31,6 +32,25 @@ class _Resp:
 
 
 class NvimCLILLMTests(unittest.TestCase):
+    def test_lexicon_loader_filters_patterns(self) -> None:
+        payload = {
+            "Word": ["US", "SU"],
+            "bad": ["X", ""],
+            "mix": ["U", 123],
+        }
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as fh:
+            json.dump(payload, fh)
+            path = fh.name
+        try:
+            out = metermeter_cli._load_word_patterns_from_path(path)
+        finally:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+        self.assertIn("word", out)
+        self.assertEqual(out["word"], ["US", "SU"])
+        self.assertNotIn("bad", out)
     def test_cli_marks_refined_lines_as_llm(self) -> None:
         req = {
             "config": {

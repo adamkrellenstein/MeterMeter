@@ -250,6 +250,42 @@ local function run_idle_no_extra_work()
   end
 end
 
+local function run_error_hint()
+  metermeter.setup({
+    rescan_interval_ms = 0,
+    debounce_ms = 1,
+    llm = { enabled = false },
+    require_trailing_backslash = false,
+    ui = { show_error_hint = true },
+  })
+
+  vim.cmd("enew")
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_name(bufnr, "/tmp/metermeter_smoke_error.poem")
+  vim.bo[bufnr].filetype = "metermeter"
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+    "A line that should show an error hint when LLM is disabled.",
+  })
+
+  metermeter.enable(bufnr)
+  local ok = wait_for(function()
+    local marks = extmarks(bufnr)
+    for _, m in ipairs(marks) do
+      local d = m[4] or {}
+      local vt = d.virt_text
+      if vt and vt[1] and type(vt[1][1]) == "string" then
+        if vt[1][1]:find("MeterMeter LLM error", 1, true) then
+          return true
+        end
+      end
+    end
+    return false
+  end, 4000)
+  if not ok then
+    fail("error hint: expected MeterMeter LLM error virtual text")
+  end
+end
+
 local function main()
   -- Integration-focused set: avoid duplicating equivalent assertions across scenarios.
   run_backslash_gate()
@@ -258,6 +294,7 @@ local function main()
   run_duplicate_lines_cache_binding()
   run_manual_toggle_for_non_poem()
   run_idle_no_extra_work()
+  run_error_hint()
   vim.cmd("qa!")
 end
 
