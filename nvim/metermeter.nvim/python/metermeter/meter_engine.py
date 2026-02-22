@@ -25,60 +25,26 @@ LINE_NAME_BY_FEET = {
     6: "hexameter",
 }
 
-# Small built-in lexicon for common poetic/archaic forms and high-impact words.
-# This supplements the tiny bundled CMU subset.
-BUILTIN_WORD_PATTERNS: Dict[str, List[str]] = {
-    "i": ["U"],
-    "shall": ["U", "S"],
-    "thou": ["U", "S"],
-    "thee": ["U", "S"],
-    "thy": ["U", "S"],
-    "hath": ["U", "S"],
-    "ow'st": ["S"],
-    "wander'st": ["SU", "US"],
-    "grow'st": ["S"],
-    "temperate": ["SU", "SUU"],
-    "compare": ["US"],
-    "lovely": ["SU"],
-    "darling": ["SU"],
-    "summer": ["SU"],
-    "sometime": ["SU"],
-    "marriage": ["SU"],
-    "admit": ["US"],
-    "impediments": ["USUU", "USU"],
-    "wandering": ["SU", "SUU"],
-    "even": ["U", "SU", "S"],
-    "love's": ["S"],
-    "time's": ["S"],
-    "rosy": ["SU"],
-    "music": ["SU"],
-    "mistress": ["SU"],
-    "wires": ["S", "SU"],
-    "damasked": ["SU", "US"],
-    "perfumes": ["US", "SU"],
-    "delight": ["US"],
-    "often": ["SU"],
-    "every": ["SU"],
-    "declines": ["US"],
-    "nature's": ["SU"],
-    "changing": ["SU"],
-    "untrimmed": ["US"],
-    "eternal": ["USU"],
-    "possession": ["USU"],
-    "complexion": ["USU"],
-    "lives": ["S", "U"],
-    "gives": ["S", "U"],
-    "more": ["U", "S"],
-    "too": ["U", "S"],
-    "nor": ["U", "S"],
-    "this": ["U", "S"],
-    "that": ["U", "S"],
-    "but": ["U", "S"],
-    "let": ["U", "S"],
-    "me": ["U", "S"],
-    "it": ["U", "S"],
-    "heaven": ["S", "SU"],
-}
+def _load_builtin_lexicon() -> Dict[str, List[str]]:
+    path = os.path.join(os.path.dirname(__file__), "builtin_lexicon.json")
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+    out: Dict[str, List[str]] = {}
+    for k, v in raw.items():
+        if not isinstance(k, str) or not isinstance(v, list):
+            continue
+        clean = []
+        for p in v:
+            if isinstance(p, str) and p and set(p).issubset({"U", "S"}):
+                clean.append(p)
+        if clean:
+            out[k.lower()] = clean
+    return out
+
+
+BUILTIN_WORD_PATTERNS: Dict[str, List[str]] = _load_builtin_lexicon()
 
 
 @dataclass

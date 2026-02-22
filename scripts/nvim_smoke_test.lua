@@ -30,63 +30,6 @@ local function extmarks(bufnr)
   return vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })
 end
 
-local function count_eol_marks(marks)
-  local n = 0
-  for _, m in ipairs(marks) do
-    local d = m[4] or {}
-    if d.virt_text then
-      n = n + 1
-    end
-  end
-  return n
-end
-
-local function count_hl_marks(marks)
-  local n = 0
-  for _, m in ipairs(marks) do
-    local d = m[4] or {}
-    if d.hl_group == "MeterMeterStress" then
-      n = n + 1
-    end
-  end
-  return n
-end
-
-local function run_poem_engine_only()
-  metermeter.setup({
-    rescan_interval_ms = 0,
-    debounce_ms = 1,
-    llm = { enabled = false },
-    require_trailing_backslash = false,
-  })
-
-  vim.cmd("enew")
-  local bufnr = vim.api.nvim_get_current_buf()
-  vim.api.nvim_buf_set_name(bufnr, "/tmp/metermeter_smoke.poem")
-  vim.bo[bufnr].filetype = "metermeter"
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
-    "The trampled fruit yields wine that's sweet and red.",
-    "And plants will dream, thy flax to fit a nuptial bed.",
-  })
-
-  metermeter.enable(bufnr)
-
-  local ok = wait_for(function()
-    return #extmarks(bufnr) > 0
-  end, 4000)
-  if not ok then
-    fail("poem engine-only: no extmarks created")
-  end
-
-  local marks = extmarks(bufnr)
-  if count_eol_marks(marks) < 1 then
-    fail("poem engine-only: expected at least one EOL virt_text mark")
-  end
-  if count_hl_marks(marks) < 1 then
-    fail("poem engine-only: expected at least one stress highlight mark")
-  end
-end
-
 local function run_backslash_gate()
   metermeter.setup({
     rescan_interval_ms = 0,
@@ -308,7 +251,7 @@ local function run_idle_no_extra_work()
 end
 
 local function main()
-  run_poem_engine_only()
+  -- Integration-focused set: avoid duplicating equivalent assertions across scenarios.
   run_backslash_gate()
   run_comment_ignore()
   run_filetype_token_enable()

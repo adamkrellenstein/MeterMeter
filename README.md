@@ -144,6 +144,8 @@ All options are passed to:
 require("metermeter").setup({ ... })
 ```
 
+### Core Options
+
 | Option | Default | What it does | Why it exists |
 |---|---:|---|---|
 | `debounce_ms` | `80` | Delay after edits before rescanning. | Avoids rescanning on every keystroke burst. |
@@ -152,16 +154,21 @@ require("metermeter").setup({ ... })
 | `ui.stress` | `true` | Enables stress span highlighting. | Allows turning off visual emphasis if user only wants meter labels. |
 | `ui.meter_hints` | `true` | Shows meter annotations at line end. | Supports a cleaner “highlights only” mode when false. |
 | `ui.meter_hint_confidence_levels` | `6` | Number of confidence tint steps for EOL meter text. | Balances subtle confidence signaling vs. visual noise. |
-| `ui.show_analysis_hint` | `false` | Enables display of optional LLM poetic note text. | Keeps default UI minimal while allowing richer feedback when requested. |
-| `ui.analysis_hint_mode` | `"off"` | Hint display mode: `off` or `inline`. | Lets users choose whether notes should affect layout/visual density. |
 | `require_trailing_backslash` | `false` | If true, only scans lines ending with `\`. | Useful for mixed prose/code documents where only explicit poem lines should be scanned. |
-| `cache.max_entries` | `5000` | Max number of cached analysis entries per buffer (LRU-style eviction). | Prevents unbounded memory growth in long sessions. |
-| `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path used by `:MeterMeterDump`. | Fast, file-based debugging without requiring interactive logging hooks. |
 | `llm.enabled` | `true` | Enables LLM refinement layer. | Lets users choose deterministic-only mode when needed. |
 | `llm.endpoint` | `http://127.0.0.1:11434/v1/chat/completions` | OpenAI-compatible chat endpoint. | Supports local Ollama and compatible providers uniformly. |
 | `llm.model` | `qwen2.5:7b-instruct` | Model name sent to endpoint. | Keeps model choice explicit and user-switchable. |
 | `llm.timeout_ms` | `30000` | HTTP timeout for LLM calls. | Prevents scanner stalls on slow/unavailable models. |
 | `llm.temperature` | `0.1` | Sampling temperature for refinement requests. | Keeps output mostly deterministic for meter tasks. |
+
+### Advanced Options
+
+| Option | Default | What it does | Why it exists |
+|---|---:|---|---|
+| `ui.show_analysis_hint` | `false` | Enables display of optional LLM poetic note text. | Keeps default UI minimal while allowing richer feedback when requested. |
+| `ui.analysis_hint_mode` | `"off"` | Hint display mode: `off` or `inline`. | Lets users choose whether notes should affect layout/visual density. |
+| `cache.max_entries` | `5000` | Max number of cached analysis entries per buffer (LRU-style eviction). | Prevents unbounded memory growth in long sessions. |
+| `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path used by `:MeterMeterDump`. | Fast, file-based debugging without requiring interactive logging hooks. |
 | `llm.max_lines_per_scan` | `2` | Max lines sent to LLM per scan cycle. | Controls latency/cost and keeps editor responsiveness stable. |
 | `llm.hide_non_refined` | `false` | Hide meter labels for lines not refined by LLM. | Supports “LLM-only confidence” display preference. |
 | `llm.failure_threshold` | `3` | Consecutive LLM errors before cooldown kicks in. | Prevents repeated failing requests from degrading editing responsiveness. |
@@ -200,6 +207,7 @@ The repository uses a layered regression strategy:
 Run everything locally:
 
 ```bash
+./scripts/run_all_checks.sh
 ./scripts/run_smoke_tests.sh
 ./scripts/run_static_checks.sh
 ```

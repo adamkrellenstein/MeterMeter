@@ -1,6 +1,9 @@
 local uv = vim.uv or vim.loop
 
 local M = {}
+local scanner = require("metermeter.scanner")
+local state_mod = require("metermeter.state")
+local render_mod = require("metermeter.render")
 
 local ns = vim.api.nvim_create_namespace("metermeter")
 
@@ -266,125 +269,23 @@ local function is_scan_line(bufnr, text)
 end
 
 local function candidate_line_set_for_buf(bufnr)
-  local wins = vim.fn.win_findbuf(bufnr)
-  local visible = {}
-  local prefetch_set = {}
-  local prefetch = tonumber(cfg.prefetch_lines) or 0
-  local line_count = vim.api.nvim_buf_line_count(bufnr)
-  local max_row = math.max(0, line_count - 1)
-  for _, win in ipairs(wins) do
-    win = tonumber(win) or win
-    if type(win) == "number" and vim.api.nvim_win_is_valid(win) then
-      local w0, w1 = vim.api.nvim_win_call(win, function()
-        -- vim.fn.line() can return a string in some builds; coerce later.
-        return vim.fn.line("w0"), vim.fn.line("w$")
-      end)
-      w0 = (tonumber(w0) or 1) - 1
-      w1 = (tonumber(w1) or (w0 + 1)) - 1
-      if w1 < w0 then
-        w0, w1 = w1, w0
-      end
-      for l = w0, w1 do
-        visible[l] = true
-      end
-
-      if prefetch > 0 then
-        local cur = vim.api.nvim_win_get_cursor(win)
-        local row = (cur and cur[1] and tonumber(cur[1]) or 1) - 1
-        local a = math.max(0, row - prefetch)
-        local b = math.min(max_row, row + prefetch)
-        for l = a, b do
-          if not visible[l] then
-            prefetch_set[l] = true
-          end
-        end
-      end
-    end
-  end
-
-  local visible_lines = {}
-  for lnum, _ in pairs(visible) do
-    table.insert(visible_lines, lnum)
-  end
-  table.sort(visible_lines)
-
-  local prefetch_lines = {}
-  for lnum, _ in pairs(prefetch_set) do
-    table.insert(prefetch_lines, lnum)
-  end
-  table.sort(prefetch_lines)
-
-  return visible_lines, prefetch_lines
+  return scanner.candidate_line_set_for_buf(bufnr, cfg.prefetch_lines)
 end
 
 local function viewport_signature(bufnr)
-  local wins = vim.fn.win_findbuf(bufnr)
-  if type(wins) ~= "table" or #wins == 0 then
-    return "no-win"
-  end
-  local parts = {}
-  for _, win in ipairs(wins) do
-    win = tonumber(win) or win
-    if type(win) == "number" and vim.api.nvim_win_is_valid(win) then
-      local w0, w1 = vim.api.nvim_win_call(win, function()
-        return vim.fn.line("w0"), vim.fn.line("w$")
-      end)
-      local cur = vim.api.nvim_win_get_cursor(win)
-      local ww = vim.api.nvim_win_get_width(win)
-      table.insert(parts, table.concat({
-        tostring(w0),
-        tostring(w1),
-        tostring(cur and cur[1] or 0),
-        tostring(ww or 0),
-      }, ":"))
-    end
-  end
-  table.sort(parts)
-  return table.concat(parts, "|")
+  return scanner.viewport_signature(bufnr)
 end
 
 local function combine_lines(visible_lines, prefetch_lines)
-  local out = {}
-  local seen = {}
-  for _, lnum in ipairs(visible_lines or {}) do
-    if not seen[lnum] then
-      seen[lnum] = true
-      table.insert(out, lnum)
-    end
-  end
-  for _, lnum in ipairs(prefetch_lines or {}) do
-    if not seen[lnum] then
-      seen[lnum] = true
-      table.insert(out, lnum)
-    end
-  end
-  return out
+  return scanner.combine_lines(visible_lines, prefetch_lines)
 end
 
 local function all_scan_lines_for_buf(bufnr)
-  local out = {}
-  local line_count = vim.api.nvim_buf_line_count(bufnr)
-  for lnum = 0, line_count - 1 do
-    local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
-    if is_scan_line(bufnr, text) then
-      table.insert(out, lnum)
-    end
-  end
-  return out
+  return scanner.all_scan_lines_for_buf(bufnr, is_scan_line)
 end
 
 local function subtract_lines(base_lines, remove_lines)
-  local seen = {}
-  for _, lnum in ipairs(remove_lines or {}) do
-    seen[lnum] = true
-  end
-  local out = {}
-  for _, lnum in ipairs(base_lines or {}) do
-    if not seen[lnum] then
-      table.insert(out, lnum)
-    end
-  end
-  return out
+  return scanner.subtract_lines(base_lines, remove_lines)
 end
 
 local function json_encode(x)
@@ -400,29 +301,7 @@ local function ensure_state(bufnr)
   if st then
     return st
   end
-  st = {
-    enabled = false,
-    user_enabled = nil, -- nil => auto by filetype, bool => explicit buffer override
-    timer = nil,
-    tick = nil,
-    cache = {},
-    cache_size = 0,
-    cache_seq = 0,
-    scan_generation = 0,
-    scan_running = false,
-    scan_changedtick = -1,
-    last_changedtick = -1,
-    last_view_sig = "",
-    last_render_sig = "",
-    last_llm_changedtick = -1,
-    last_llm_view_sig = "",
-    llm_fail_count = 0,
-    llm_cooldown_until = 0,
-    debug_scan_count = 0,
-    debug_cli_count = 0,
-    debug_llm_cli_count = 0,
-    debug_apply_count = 0,
-  }
+  st = state_mod.new_state()
   state_by_buf[bufnr] = st
   return st
 end
@@ -606,17 +485,9 @@ local function apply_results(bufnr, results)
   end
 end
 
-local function render_signature(results)
-  local ok, encoded = pcall(json_encode, results or {})
-  if ok and type(encoded) == "string" then
-    return encoded
-  end
-  return tostring(results and #results or 0)
-end
-
 local function maybe_apply_results(bufnr, results)
   local st = ensure_state(bufnr)
-  local sig = render_signature(results)
+  local sig = render_mod.render_signature(json_encode, results)
   if sig == (st.last_render_sig or "") then
     return
   end
@@ -720,28 +591,8 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
   return out
 end
 
-local function chunk_lines(lines, chunk_size)
-  local out = {}
-  local size = tonumber(chunk_size) or 1
-  if size < 1 then
-    size = 1
-  end
-  local n = #lines
-  local i = 1
-  while i <= n do
-    local chunk = {}
-    local jmax = math.min(n, i + size - 1)
-    for j = i, jmax do
-      table.insert(chunk, lines[j])
-    end
-    table.insert(out, chunk)
-    i = jmax + 1
-  end
-  return out
-end
-
 local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chunk_size, llm_enabled, require_llm_source, on_done)
-  local chunks = chunk_lines(lines or {}, chunk_size)
+  local chunks = scanner.chunk_lines(lines or {}, chunk_size)
   local idx = 1
 
   local function step()
@@ -889,10 +740,7 @@ local function do_scan(bufnr)
 end
 
 local function stop_scan_state(st)
-  st.scan_running = false
-  st.scan_changedtick = -1
-  st.last_changedtick = -1
-  st.last_view_sig = ""
+  state_mod.stop_scan_state(st)
 end
 
 local function cleanup_buf(bufnr)
