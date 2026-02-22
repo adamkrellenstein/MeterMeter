@@ -27,6 +27,10 @@ class LLMRefinement:
     confidence: float
     analysis_hint: str
     token_patterns: List[str]
+    meter_name_raw: str = ""
+    meter_name_normalized: bool = False
+    token_repairs_applied: int = 0
+    strict_eval: bool = False
 
 
 def _extract_json_obj(content: str) -> Optional[dict]:
@@ -150,9 +154,16 @@ class LLMRefiner:
             return ""
         return path
 
-    def _normalize_token_pattern(self, raw_pat: str, expected_len: int, baseline_pat: str) -> str:
+    def _normalize_token_pattern(
+        self,
+        raw_pat: str,
+        expected_len: int,
+        baseline_pat: str,
+        allow_symbol_cleanup: bool,
+        allow_repair: bool,
+    ) -> str:
         p = (raw_pat or "").strip().upper()
-        if p:
+        if p and allow_symbol_cleanup:
             # Some models emit separators like "U.S" or "S-U"; keep only stress symbols.
             p = "".join(ch for ch in p if ch in {"U", "S"})
         if expected_len <= 0:
@@ -161,6 +172,8 @@ class LLMRefiner:
             return ""
         if len(p) == expected_len:
             return p
+        if not allow_repair:
+            return ""
         # Practical repair: many models return per-token U/S rather than per-syllable.
         # Use baseline syllable scaffold for length correction while preserving valid stress alphabet.
         if baseline_pat and len(baseline_pat) == expected_len and STRESS_RE.match(baseline_pat):
@@ -176,9 +189,12 @@ class LLMRefiner:
         baselines: List[LineAnalysis],
         timeout_ms: int,
         temperature: float,
+        eval_mode: str = "production",
     ) -> Dict[int, LLMRefinement]:
         if not baselines:
             return {}
+        mode = (eval_mode or "production").strip().lower()
+        strict_eval = mode == "strict"
         if self.endpoint.startswith("mock://"):
             out: Dict[int, LLMRefinement] = {}
             for b in baselines:
@@ -187,6 +203,10 @@ class LLMRefiner:
                     confidence=max(0.0, min(1.0, float(b.confidence))),
                     analysis_hint="mock",
                     token_patterns=list(b.token_patterns or []),
+                    meter_name_raw=(b.meter_name or "").strip().lower(),
+                    meter_name_normalized=False,
+                    token_repairs_applied=0,
+                    strict_eval=strict_eval,
                 )
             return out
         timeout_s = max(0.2, float(timeout_ms) / 1000.0)
@@ -302,7 +322,12 @@ class LLMRefiner:
             meter_name = item.get("meter_name") or item.get("final_meter") or ""
             if not isinstance(meter_name, str) or not meter_name.strip():
                 continue
-            meter_name = self._canonical_meter_name(meter_name, base)
+            meter_name_raw = " ".join(meter_name.strip().lower().split())
+            if strict_eval:
+                meter_name = meter_name_raw
+            else:
+                meter_name = self._canonical_meter_name(meter_name_raw, base)
+            meter_name_normalized = meter_name != meter_name_raw
 
             conf = item.get("confidence") or item.get("meter_confidence")
             if not isinstance(conf, (int, float)):
@@ -317,12 +342,19 @@ class LLMRefiner:
             token_patterns = item.get("token_stress_patterns") or item.get("token_patterns") or []
             if not isinstance(token_patterns, list):
                 continue
-            if len(token_patterns) > len(base.tokens):
-                token_patterns = token_patterns[: len(base.tokens)]
-            elif len(token_patterns) < len(base.tokens):
-                for i in range(len(token_patterns), len(base.tokens)):
-                    fallback = base.token_patterns[i] if i < len(base.token_patterns) else "U"
-                    token_patterns.append(fallback)
+            repair_count = 0
+            if strict_eval:
+                if len(token_patterns) != len(base.tokens):
+                    continue
+            else:
+                if len(token_patterns) > len(base.tokens):
+                    repair_count += len(token_patterns) - len(base.tokens)
+                    token_patterns = token_patterns[: len(base.tokens)]
+                elif len(token_patterns) < len(base.tokens):
+                    repair_count += len(base.tokens) - len(token_patterns)
+                    for i in range(len(token_patterns), len(base.tokens)):
+                        fallback = base.token_patterns[i] if i < len(base.token_patterns) else "U"
+                        token_patterns.append(fallback)
             normalized: List[str] = []
             token_syllables = [len(p) for p in (base.token_patterns or [])]
             if len(token_syllables) != len(base.tokens):
@@ -335,10 +367,19 @@ class LLMRefiner:
                     ok = False
                     break
                 baseline_pat = base.token_patterns[i] if i < len(base.token_patterns) else ""
-                norm = self._normalize_token_pattern(p, int(token_syllables[i]), baseline_pat)
+                raw_pat = (p or "").strip().upper()
+                norm = self._normalize_token_pattern(
+                    p,
+                    int(token_syllables[i]),
+                    baseline_pat,
+                    allow_symbol_cleanup=(not strict_eval),
+                    allow_repair=(not strict_eval),
+                )
                 if not norm:
                     ok = False
                     break
+                if norm != raw_pat:
+                    repair_count += 1
                 normalized.append(norm)
             if not ok or len(normalized) != len(base.tokens):
                 continue
@@ -348,15 +389,19 @@ class LLMRefiner:
                 confidence=conf,
                 analysis_hint=hint,
                 token_patterns=normalized,
+                meter_name_raw=meter_name_raw,
+                meter_name_normalized=meter_name_normalized,
+                token_repairs_applied=repair_count,
+                strict_eval=strict_eval,
             )
 
         # Some models occasionally omit/garble one line in a batch even when others are valid.
         # Retry missing lines individually to improve robustness without engine fallback.
-        if 0 < len(out) < len(baselines):
+        if (not strict_eval) and 0 < len(out) < len(baselines):
             missing = [b for b in baselines if int(b.line_no) not in out]
             for b in missing:
                 try:
-                    single = self.refine_lines([b], timeout_ms=timeout_ms, temperature=temperature)
+                    single = self.refine_lines([b], timeout_ms=timeout_ms, temperature=temperature, eval_mode=mode)
                     if int(b.line_no) in single:
                         out[int(b.line_no)] = single[int(b.line_no)]
                 except Exception:

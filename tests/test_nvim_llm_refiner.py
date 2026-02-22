@@ -48,6 +48,21 @@ def _baseline(line_no: int, text: str) -> LineAnalysis:
     )
 
 
+def _baseline_multi(line_no: int, text: str) -> LineAnalysis:
+    return LineAnalysis(
+        line_no=line_no,
+        source_text=text,
+        tokens=["Sometime", "sun"],
+        stress_pattern="USS",
+        meter_name="iambic dimeter",
+        feet_count=2,
+        confidence=0.8,
+        oov_tokens=[],
+        debug_scores={"iambic:2": 0.8},
+        token_patterns=["US", "S"],
+    )
+
+
 class NvimLLMRefinerTests(unittest.TestCase):
     def test_refine_lines_parses_results(self) -> None:
         baselines = [_baseline(10, "To strive to seek")]
@@ -191,6 +206,8 @@ class NvimLLMRefinerTests(unittest.TestCase):
             out = ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
         self.assertIn(9, out)
         self.assertEqual(out[9].meter_name, "iambic dimeter")
+        self.assertEqual(out[9].meter_name_raw, "iambs")
+        self.assertTrue(out[9].meter_name_normalized)
 
     def test_repairs_token_pattern_syllable_length_mismatch(self) -> None:
         baselines = [_baseline(12, "To strive to seek")]
@@ -214,3 +231,51 @@ class NvimLLMRefinerTests(unittest.TestCase):
             out = ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
         self.assertIn(12, out)
         self.assertEqual(out[12].token_patterns, baselines[0].token_patterns)
+        self.assertGreater(out[12].token_repairs_applied, 0)
+
+    def test_strict_mode_rejects_separator_token_patterns(self) -> None:
+        baselines = [_baseline_multi(2, "Sometime sun")]
+        content = json.dumps(
+            {
+                "results": [
+                    {
+                        "line_no": 2,
+                        "meter_name": "iambic dimeter",
+                        "confidence": 0.8,
+                        "analysis_hint": "strict",
+                        "token_stress_patterns": ["U.S", "S"],
+                    }
+                ]
+            },
+            ensure_ascii=True,
+        )
+        response = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=True)
+        with patch("urllib.request.urlopen", return_value=_Resp(response)):
+            ref = LLMRefiner(endpoint="http://mock", model="mock")
+            with self.assertRaises(RuntimeError):
+                ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1, eval_mode="strict")
+
+    def test_production_mode_repairs_separator_token_patterns(self) -> None:
+        baselines = [_baseline_multi(3, "Sometime sun")]
+        content = json.dumps(
+            {
+                "results": [
+                    {
+                        "line_no": 3,
+                        "meter_name": "iambic dimeter",
+                        "confidence": 0.8,
+                        "analysis_hint": "prod",
+                        "token_stress_patterns": ["U.S", "S"],
+                    }
+                ]
+            },
+            ensure_ascii=True,
+        )
+        response = json.dumps({"choices": [{"message": {"content": content}}]}, ensure_ascii=True)
+        with patch("urllib.request.urlopen", return_value=_Resp(response)):
+            ref = LLMRefiner(endpoint="http://mock", model="mock")
+            out = ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1, eval_mode="production")
+        self.assertIn(3, out)
+        self.assertEqual(out[3].token_patterns, ["US", "S"])
+        self.assertGreater(out[3].token_repairs_applied, 0)
+        self.assertFalse(out[3].strict_eval)

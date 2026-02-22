@@ -143,6 +143,9 @@ def main() -> int:
     timeout_ms = int(llm_cfg.get("timeout_ms", 30000))
     temp = float(llm_cfg.get("temperature", 0.1))
     max_llm = int(llm_cfg.get("max_lines_per_scan", 0))
+    eval_mode = str(llm_cfg.get("eval_mode", "production") or "production").strip().lower()
+    if eval_mode not in {"production", "strict"}:
+        eval_mode = "production"
 
     if not llm_enabled:
         error_msg = "llm_disabled"
@@ -154,13 +157,15 @@ def main() -> int:
         try:
             refiner = LLMRefiner(endpoint=endpoint, model=model, api_key=str(llm_cfg.get("api_key", "") or ""))
             subset = analyses[: max_llm]
-            refined = refiner.refine_lines(subset, timeout_ms=timeout_ms, temperature=temp)
+            refined = refiner.refine_lines(subset, timeout_ms=timeout_ms, temperature=temp, eval_mode=eval_mode)
             if not refined:
                 error_msg = "llm_invalid_or_empty_response"
         except Exception as exc:
             error_msg = str(exc) or "llm_refine_failed"
 
     results: List[dict] = []
+    meter_normalizations = 0
+    token_repairs = 0
     for a in analyses:
         if error_msg is not None:
             continue
@@ -168,10 +173,18 @@ def main() -> int:
         if r is None:
             continue
         meter_name = getattr(r, "meter_name", "") or ""
+        meter_name_raw = getattr(r, "meter_name_raw", "") or meter_name
+        meter_name_normalized = bool(getattr(r, "meter_name_normalized", False))
+        token_repairs_applied = int(getattr(r, "token_repairs_applied", 0) or 0)
+        strict_eval_result = bool(getattr(r, "strict_eval", False))
         conf = getattr(r, "confidence", 0.0) or 0.0
         hint = getattr(r, "analysis_hint", "") or ""
         token_patterns = getattr(r, "token_patterns", []) or []
         source = "llm"
+        if meter_name_normalized:
+            meter_normalizations += 1
+        if token_repairs_applied > 0:
+            token_repairs += token_repairs_applied
 
         spans = _stress_spans_for_line(a.source_text, token_patterns)
         results.append(
@@ -179,15 +192,29 @@ def main() -> int:
                 "lnum": int(a.line_no),
                 "text": a.source_text,
                 "meter_name": meter_name,
+                "meter_name_raw": meter_name_raw,
+                "meter_name_normalized": meter_name_normalized,
                 "confidence": float(conf),
                 "source": source,
                 "hint": hint,
                 "token_patterns": token_patterns,
                 "stress_spans": spans,
+                "token_repairs_applied": token_repairs_applied,
+                "strict_eval": strict_eval_result,
             }
         )
 
-    payload = {"results": results}
+    payload = {
+        "results": results,
+        "eval": {
+            "mode": eval_mode,
+            "line_count": len(analyses),
+            "result_count": len(results),
+            "meter_normalizations": meter_normalizations,
+            "token_repairs": token_repairs,
+            "strict": eval_mode == "strict",
+        },
+    }
     if error_msg is not None:
         payload["error"] = error_msg
     sys.stdout.write(json.dumps(payload, ensure_ascii=True))

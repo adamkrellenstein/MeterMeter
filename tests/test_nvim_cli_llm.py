@@ -83,6 +83,9 @@ class NvimCLILLMTests(unittest.TestCase):
         results = out.get("results") or []
         self.assertEqual(len(results), 2)
         self.assertTrue(all(r.get("source") == "llm" for r in results), results)
+        eval_obj = out.get("eval") or {}
+        self.assertEqual(eval_obj.get("mode"), "production")
+        self.assertEqual(eval_obj.get("result_count"), 2)
 
     def test_cli_errors_when_llm_disabled(self) -> None:
         req = {
@@ -103,6 +106,7 @@ class NvimCLILLMTests(unittest.TestCase):
         results = out.get("results") or []
         self.assertEqual(len(results), 0)
         self.assertEqual(out.get("error"), "llm_disabled")
+        self.assertEqual((out.get("eval") or {}).get("mode"), "production")
 
     def test_cli_ignores_invalid_line_entries(self) -> None:
         req = {
@@ -126,3 +130,30 @@ class NvimCLILLMTests(unittest.TestCase):
         out = json.loads(stdout.getvalue() or "{}")
         results = out.get("results") or []
         self.assertEqual([r.get("lnum") for r in results], [0, 4])
+        self.assertEqual((out.get("eval") or {}).get("result_count"), 2)
+
+    def test_cli_strict_eval_mode_reports_strict(self) -> None:
+        req = {
+            "config": {
+                "llm": {
+                    "enabled": True,
+                    "endpoint": "mock://llm",
+                    "model": "mock",
+                    "max_lines_per_scan": 16,
+                    "eval_mode": "strict",
+                }
+            },
+            "lines": [
+                {"lnum": 0, "text": "Valid line one."},
+            ],
+        }
+
+        stdin = io.StringIO(json.dumps(req, ensure_ascii=True))
+        stdout = io.StringIO()
+        with patch("sys.stdin", stdin), patch("sys.stdout", stdout):
+            rc = metermeter_cli.main()
+        self.assertEqual(rc, 0)
+        out = json.loads(stdout.getvalue() or "{}")
+        eval_obj = out.get("eval") or {}
+        self.assertEqual(eval_obj.get("mode"), "strict")
+        self.assertTrue(eval_obj.get("strict"))

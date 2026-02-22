@@ -166,6 +166,7 @@ require("metermeter").setup({ ... })
 | `llm.model` | `qwen2.5:7b-instruct` | Model name sent to endpoint. | Keeps model choice explicit and user-switchable. |
 | `llm.timeout_ms` | `30000` | HTTP timeout for LLM calls. | Prevents scanner stalls on slow/unavailable models. |
 | `llm.temperature` | `0.1` | Sampling temperature for refinement requests. | Keeps output mostly deterministic for meter tasks. |
+| `llm.eval_mode` | `"production"` | LLM evaluation mode: `production` or `strict`. | `strict` disables normalization/repair so tests can measure raw model quality. |
 
 ### Advanced Options
 
@@ -228,9 +229,18 @@ export METERMETER_LLM_MODEL="qwen2.5:7b-instruct"
 ```
 
 `tests/test_nvim_llm_integration.py` is intentionally skipped unless `METERMETER_LLM_INTEGRATION=1`.
-It validates strict LLM-mode output and enforces real-model accuracy floors on:
+It validates real-model output and enforces integration floors on:
 - Sonnet 18 (iambic pentameter)
+- Sonnet 116 (iambic pentameter)
+- Sonnet 130 (iambic pentameter)
 - Milton, *On His Blindness* (iambic pentameter)
+- Whitman opening excerpt (free-verse anti-collapse guard)
+
+For raw-model benchmarking (no normalization/repair), set:
+
+```bash
+export METERMETER_LLM_EVAL_MODE=strict
+```
 
 ## Performance Model
 
