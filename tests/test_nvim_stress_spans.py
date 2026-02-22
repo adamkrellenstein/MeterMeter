@@ -65,3 +65,20 @@ class NvimStressSpanTests(unittest.TestCase):
         # "might": vowel group starts at "i" (index 1), highlight should include "ight".
         self.assertEqual(s, 1)
         self.assertEqual(e, len(line))
+
+    def test_apostrophe_token_span_is_within_word(self) -> None:
+        line = "thou wander'st in his shade"
+        engine = MeterEngine()
+        a = engine.analyze_line(line, line_no=0)
+        self.assertIsNotNone(a)
+        spans = metermeter_cli._stress_spans_for_line(a.source_text, a.token_patterns)
+        self.assertTrue(spans, "expected stress spans for apostrophe token")
+        token = "wander'st"
+        token_start = line.find(token)
+        self.assertGreaterEqual(token_start, 0)
+        token_end = token_start + len(token)
+        b_start = len(line[:token_start].encode("utf-8"))
+        b_end = len(line[:token_end].encode("utf-8"))
+        for s, e in spans:
+            if s >= b_start and s <= b_end:
+                self.assertLessEqual(e, b_end)
