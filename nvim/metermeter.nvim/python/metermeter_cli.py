@@ -48,6 +48,40 @@ def _load_word_patterns_from_path(path: str) -> Dict[str, List[str]]:
     return out
 
 
+def _resolve_lexicon_path(path: str) -> str:
+    path = str(path or "").strip()
+    if path and os.path.exists(path):
+        return path
+    env_path = os.environ.get("METERMETER_LEXICON_PATH", "").strip()
+    if env_path and os.path.exists(env_path):
+        return env_path
+    home = os.path.expanduser("~")
+    for candidate in [
+        os.path.join(home, ".metermeter", "cmudict.json.gz"),
+        os.path.join(home, ".metermeter", "cmudict.json"),
+    ]:
+        if os.path.exists(candidate):
+            return candidate
+    return path
+
+
+def _resolve_extra_lexicon_path(path: str) -> str:
+    path = str(path or "").strip()
+    if path and os.path.exists(path):
+        return path
+    env_path = os.environ.get("METERMETER_EXTRA_LEXICON_PATH", "").strip()
+    if env_path and os.path.exists(env_path):
+        return env_path
+    home = os.path.expanduser("~")
+    for candidate in [
+        os.path.join(home, ".metermeter", "extra_lexicon.json.gz"),
+        os.path.join(home, ".metermeter", "extra_lexicon.json"),
+    ]:
+        if os.path.exists(candidate):
+            return candidate
+    return path
+
+
 def _even_spans(length: int, target: int) -> List[Tuple[int, int]]:
     if length <= 0:
         return []
@@ -181,6 +215,8 @@ def main() -> int:
     context_cfg = (config.get("context") or {}) if isinstance(config, dict) else {}
     lexicon_path = str(config.get("lexicon_path") or "").strip() if isinstance(config, dict) else ""
     extra_lexicon_path = str(config.get("extra_lexicon_path") or "").strip() if isinstance(config, dict) else ""
+    lexicon_path = _resolve_lexicon_path(lexicon_path)
+    extra_lexicon_path = _resolve_extra_lexicon_path(extra_lexicon_path)
 
     engine = MeterEngine(dict_path=lexicon_path or None)
     if extra_lexicon_path:

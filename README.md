@@ -144,6 +144,11 @@ Then MeterMeter will only annotate lines that end with a trailing backslash (`\`
 
 Comment lines are ignored using the buffer's native `&comments` / `&commentstring`.
 
+### Large Vocabulary Default
+
+If a large lexicon file exists at `~/.metermeter/cmudict.json.gz` (or `METERMETER_LEXICON_PATH` is set),
+MeterMeter will use it automatically without extra config. You can still override with `lexicon_path`.
+
 ## Configuration Reference
 
 All options are passed to:
