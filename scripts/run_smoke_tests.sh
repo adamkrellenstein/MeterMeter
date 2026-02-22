@@ -9,5 +9,10 @@ nvim --headless -u NONE -i NONE \
   +"luafile ${ROOT}/scripts/nvim_smoke_test.lua"
 
 echo "[smoke] python unit tests (llm mocked; no network)"
-python3 -m unittest -q tests.test_nvim_llm_refiner tests.test_nvim_cli_llm tests.test_nvim_stress_spans
+python3 -m unittest -q \
+  tests.test_nvim_llm_refiner \
+  tests.test_nvim_cli_llm \
+  tests.test_nvim_stress_spans \
+  tests.test_nvim_sonnet18_accuracy \
+  tests.test_nvim_shakespeare_accuracy
 echo "[smoke] ok"

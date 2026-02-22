@@ -6,6 +6,30 @@ This is a Neovim-first implementation focused on real-time scansion and meter hi
 
 Scanning is progressive and incremental: visible lines are annotated first, nearby prefetch lines next, then remaining scanable lines across the buffer. Cached results are reused for unchanged lines, and LLM refinements patch in after baseline engine results.
 
+## Architecture
+
+MeterMeter has two layers:
+
+- Neovim runtime layer (`lua/metermeter/init.lua`)
+  - Determines which lines are scanable (ignores native comment lines).
+  - Schedules scans with debounce + periodic tick.
+  - Runs progressive scan phases (`visible -> prefetch -> rest-of-buffer`).
+  - Reuses cached line analyses keyed by `(model, endpoint, line_text)`.
+  - Renders stress extmarks and aligned end-of-line meter hints.
+
+- Python analysis layer (`python/metermeter_cli.py`, `python/metermeter/meter_engine.py`)
+  - Computes deterministic baseline meter + stress spans for requested lines.
+  - Uses token-level stress options and template fitting for meter selection.
+  - Applies foot-position priors (e.g., initial inversion tolerance) and poetic lexicon overrides.
+  - Optionally refines line analysis through an OpenAI-compatible LLM endpoint.
+
+Pipeline behavior is intentionally two-phase:
+
+1. Engine-first annotations appear quickly.
+2. LLM refinements patch in afterward (if enabled), line-by-line.
+
+This keeps interaction responsive while still allowing higher final accuracy.
+
 ## Requirements
 
 - Neovim 0.10+ (uses `vim.system()` and `vim.json`).
@@ -112,3 +136,24 @@ Global toggle:
 | Variable | Default | What it does | Why it exists |
 |---|---:|---|---|
 | `vim.g.metermeter_disable_auto_setup` | `0` | If `1`, plugin won’t auto-call `setup()`. | Prevents double-setup and lets plugin managers/users fully control initialization order. |
+
+## Testing Strategy
+
+The repository uses a layered regression strategy:
+
+- Headless Neovim smoke test (`scripts/nvim_smoke_test.lua`)
+  - Verifies plugin wiring, extmark rendering, backslash gating, comment filtering, and filetype enable behavior.
+
+- Python unit tests (`tests/test_nvim_*.py`)
+  - Stress-span correctness and clipping behavior.
+  - LLM parsing/validation/fallback behavior with mocked responses.
+  - Canonical meter accuracy floors on Shakespeare fixtures:
+    - Sonnet 18
+    - Sonnet 116
+    - Sonnet 130
+
+Run everything locally:
+
+```bash
+./scripts/run_smoke_tests.sh
+```
