@@ -4,7 +4,7 @@ Local, real-time poetic meter annotation for Neovim.
 
 This repository is Neovim-first. Plugin code lives in `nvim/metermeter.nvim/`.
 
-Scanning is progressive and incremental: visible lines are annotated first, nearby prefetch lines next, then remaining scanable lines across the buffer. Cached results are reused for unchanged lines, and LLM refinements patch in after baseline engine results.
+Scanning is progressive and incremental: visible lines are annotated first, nearby prefetch lines next, then remaining scanable lines across the buffer. Cached LLM results are reused for unchanged lines.
 
 ## Architecture
 
@@ -18,17 +18,14 @@ MeterMeter has two layers:
   - Renders stress extmarks and aligned end-of-line meter hints.
 
 - Python analysis layer (`nvim/metermeter.nvim/python/metermeter_cli.py`, `nvim/metermeter.nvim/python/metermeter/meter_engine.py`)
-  - Computes deterministic baseline meter + stress spans for requested lines.
-  - Uses token-level stress options and template fitting for meter selection.
-  - Applies foot-position priors (e.g., initial inversion tolerance) and poetic lexicon overrides.
-  - Optionally refines line analysis through an OpenAI-compatible LLM endpoint.
+  - Builds token/syllable scaffolding and stress spans.
+  - Validates strict LLM JSON output (`meter_name`, `confidence`, `token_stress_patterns`).
+  - Emits annotations only for valid LLM results.
 
-Pipeline behavior is intentionally two-phase:
+Pipeline behavior is LLM-first and LLM-required:
 
-1. Engine-first annotations appear quickly.
-2. LLM refinements patch in afterward (if enabled), line-by-line.
-
-This keeps interaction responsive while still allowing higher final accuracy.
+1. Meter labels and stress highlights are shown only from valid LLM output.
+2. If the model/endpoint is unavailable or response is invalid, no annotations are shown for that scan.
 
 ### What The LLM Is Used For
 
@@ -36,17 +33,16 @@ This keeps interaction responsive while still allowing higher final accuracy.
 - Refines per-token stress patterns (used for stress highlighting).
 - Optionally provides short poetic notes (`analysis_hint`) when enabled in UI settings.
 
-### What The LLM Is Not Used For
+### Deterministic Layer
 
-- Not required for baseline scansion: deterministic engine always runs first.
-- Not used for editor control flow, gating, or file parsing.
-- Not required for offline usage.
+- Used for tokenization/syllable scaffolding and rendering guardrails.
+- Not used as a user-visible meter fallback.
 
 ## Requirements
 
 - Neovim 0.10+ (uses `vim.system()` and `vim.json`).
 - Python 3.8+ (`python3` on PATH).
-- Optional (for LLM refinement): Ollama running locally, or any OpenAI-compatible `chat/completions` endpoint.
+- Required: local Ollama (or another OpenAI-compatible `chat/completions` endpoint) with a working model.
 
 ## Compatibility Matrix
 
@@ -132,6 +128,16 @@ If you want an explicit "poetry line marker" for mixed-format files, set:
 require("metermeter").setup({ require_trailing_backslash = true })
 ```
 
+Or use a regular variable (no setup change required):
+
+```vim
+" global
+let g:metermeter_require_trailing_backslash = 1
+
+" current buffer only
+let b:metermeter_require_trailing_backslash = 1
+```
+
 Then MeterMeter will only annotate lines that end with a trailing backslash (`\`).
 
 Comment lines are ignored using the buffer's native `&comments` / `&commentstring`.
@@ -155,7 +161,7 @@ require("metermeter").setup({ ... })
 | `ui.meter_hints` | `true` | Shows meter annotations at line end. | Supports a cleaner “highlights only” mode when false. |
 | `ui.meter_hint_confidence_levels` | `6` | Number of confidence tint steps for EOL meter text. | Balances subtle confidence signaling vs. visual noise. |
 | `require_trailing_backslash` | `false` | If true, only scans lines ending with `\`. | Useful for mixed prose/code documents where only explicit poem lines should be scanned. |
-| `llm.enabled` | `true` | Enables LLM refinement layer. | Lets users choose deterministic-only mode when needed. |
+| `llm.enabled` | `true` | Enables meter analysis pipeline. Must stay `true` for annotations. | Meter output is LLM-required. |
 | `llm.endpoint` | `http://127.0.0.1:11434/v1/chat/completions` | OpenAI-compatible chat endpoint. | Supports local Ollama and compatible providers uniformly. |
 | `llm.model` | `qwen2.5:7b-instruct` | Model name sent to endpoint. | Keeps model choice explicit and user-switchable. |
 | `llm.timeout_ms` | `30000` | HTTP timeout for LLM calls. | Prevents scanner stalls on slow/unavailable models. |
@@ -170,9 +176,9 @@ require("metermeter").setup({ ... })
 | `cache.max_entries` | `5000` | Max number of cached analysis entries per buffer (LRU-style eviction). | Prevents unbounded memory growth in long sessions. |
 | `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path used by `:MeterMeterDump`. | Fast, file-based debugging without requiring interactive logging hooks. |
 | `llm.max_lines_per_scan` | `2` | Max lines sent to LLM per scan cycle. | Controls latency/cost and keeps editor responsiveness stable. |
-| `llm.hide_non_refined` | `false` | Hide meter labels for lines not refined by LLM. | Supports “LLM-only confidence” display preference. |
-| `llm.failure_threshold` | `3` | Consecutive LLM errors before cooldown kicks in. | Prevents repeated failing requests from degrading editing responsiveness. |
-| `llm.cooldown_ms` | `15000` | Cooldown duration after hitting failure threshold. | Gives local runtime/endpoints time to recover while keeping engine-only mode active. |
+| `llm.hide_non_refined` | `false` | Retained for compatibility; has no practical effect in strict LLM-only mode. | Keeps settings stable across upgrades. |
+| `llm.failure_threshold` | `3` | Consecutive LLM errors before cooldown kicks in. | Prevents repeated failing requests from thrashing the editor. |
+| `llm.cooldown_ms` | `15000` | Cooldown duration after hitting failure threshold. | Gives local runtime/endpoints time to recover before retry. |
 
 Global toggle:
 
@@ -189,7 +195,7 @@ The repository uses a layered regression strategy:
 
 - Python unit tests (`tests/test_nvim_*.py`)
   - Stress-span correctness and clipping behavior.
-  - LLM parsing/validation/fallback behavior with mocked responses.
+  - LLM parsing/validation behavior with mocked responses.
 - Canonical meter accuracy floors on Shakespeare fixtures:
   - Sonnet 18
   - Sonnet 116
@@ -212,20 +218,32 @@ Run everything locally:
 ./scripts/run_static_checks.sh
 ```
 
+Run real LLM integration accuracy checks (opt-in):
+
+```bash
+export METERMETER_LLM_INTEGRATION=1
+export METERMETER_LLM_ENDPOINT="http://127.0.0.1:11434/v1/chat/completions"
+export METERMETER_LLM_MODEL="qwen2.5:7b-instruct"
+./scripts/run_llm_integration_tests.sh
+```
+
+`tests/test_nvim_llm_integration.py` is intentionally skipped unless `METERMETER_LLM_INTEGRATION=1`.
+It validates strict LLM-mode output and enforces a Sonnet 18 iambic-pentameter accuracy floor.
+
 ## Performance Model
 
 - Scan order is prioritized: `visible -> prefetch -> rest-of-buffer`.
-- Engine pass is always first and incremental.
-- LLM pass is incremental and optional.
+- LLM pass is incremental and cached.
 - Cache is reused across rescans for unchanged lines.
-- If LLM repeatedly fails, MeterMeter enters temporary LLM cooldown and continues engine-only annotations.
+- If LLM repeatedly fails, MeterMeter enters temporary cooldown and suppresses annotations until healthy again.
 - Idle guard skips rescans when both buffer text (`changedtick`) and viewport signature are unchanged.
 
 ## Troubleshooting
 
-- If meter hints appear but LLM notes/refinements do not:
+- If annotations do not appear:
   - verify `llm.endpoint` and `llm.model`
-  - check local runtime health (e.g. Ollama running)
+  - check local runtime health (e.g. Ollama running and model available)
+  - run `:MeterMeterStatus` to inspect `llm_error`
   - wait for cooldown expiry if repeated failures occurred
 - Dump runtime state with:
   - `:MeterMeterDump`

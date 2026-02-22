@@ -34,7 +34,7 @@ local function run_backslash_gate()
   metermeter.setup({
     rescan_interval_ms = 0,
     debounce_ms = 1,
-    llm = { enabled = false },
+    llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
     require_trailing_backslash = true,
   })
 
@@ -70,7 +70,7 @@ local function run_comment_ignore()
   metermeter.setup({
     rescan_interval_ms = 0,
     debounce_ms = 1,
-    llm = { enabled = false },
+    llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
     require_trailing_backslash = false,
   })
 
@@ -109,7 +109,7 @@ local function run_filetype_token_enable()
   metermeter.setup({
     rescan_interval_ms = 0,
     debounce_ms = 1,
-    llm = { enabled = false },
+    llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
     require_trailing_backslash = false,
   })
 
@@ -135,7 +135,7 @@ local function run_duplicate_lines_cache_binding()
   metermeter.setup({
     rescan_interval_ms = 0,
     debounce_ms = 1,
-    llm = { enabled = false },
+    llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
     require_trailing_backslash = false,
   })
 
@@ -171,7 +171,7 @@ local function run_manual_toggle_for_non_poem()
   metermeter.setup({
     rescan_interval_ms = 0,
     debounce_ms = 1,
-    llm = { enabled = false },
+    llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
     require_trailing_backslash = false,
   })
 
@@ -208,7 +208,7 @@ local function run_idle_no_extra_work()
   metermeter.setup({
     rescan_interval_ms = 100,
     debounce_ms = 1,
-    llm = { enabled = false },
+    llm = { enabled = true, endpoint = "mock://llm", model = "mock", max_lines_per_scan = 64 },
     require_trailing_backslash = false,
   })
 

@@ -19,6 +19,7 @@ function M.new_state()
     last_llm_view_sig = "",
     llm_fail_count = 0,
     llm_cooldown_until = 0,
+    llm_error = "",
     debug_scan_count = 0,
     debug_cli_count = 0,
     debug_llm_cli_count = 0,

@@ -49,18 +49,24 @@ class NvimCLILLMTests(unittest.TestCase):
             ],
         }
 
-        # Build a refinement response for both lines; patterns must match token counts, but the
-        # refiner falls back to baseline if they don't, so keep it minimal and valid by giving
-        # 1-syllable patterns per token length (CLI baseline tokens differ per line, but our
-        # refiner validates token count against baseline; easiest is to return empty results and
-        # ensure the CLI still runs. For "source":"llm", we must return matching token counts,
-        # so we mirror baseline token counts by leaving token_stress_patterns absent and rely on
-        # fallback. That still sets source=llm because a refinement object exists.
+        # Build a strict-valid refinement response for both lines.
         content = json.dumps(
             {
                 "results": [
-                    {"line_no": 0, "meter_name": "iambic pentameter", "confidence": 0.9, "analysis_hint": "mock"},
-                    {"line_no": 1, "meter_name": "iambic pentameter", "confidence": 0.9, "analysis_hint": "mock"},
+                    {
+                        "line_no": 0,
+                        "meter_name": "iambic pentameter",
+                        "confidence": 0.9,
+                        "analysis_hint": "mock",
+                        "token_stress_patterns": ["U", "SU", "S", "U", "S", "U", "S", "U", "S"],
+                    },
+                    {
+                        "line_no": 1,
+                        "meter_name": "iambic pentameter",
+                        "confidence": 0.9,
+                        "analysis_hint": "mock",
+                        "token_stress_patterns": ["U", "S", "U", "S", "U", "S", "U", "S", "U", "SU", "S"],
+                    },
                 ]
             },
             ensure_ascii=True,
@@ -78,7 +84,7 @@ class NvimCLILLMTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertTrue(all(r.get("source") == "llm" for r in results), results)
 
-    def test_cli_uses_engine_when_llm_disabled(self) -> None:
+    def test_cli_errors_when_llm_disabled(self) -> None:
         req = {
             "config": {"llm": {"enabled": False}},
             "lines": [
@@ -95,12 +101,12 @@ class NvimCLILLMTests(unittest.TestCase):
 
         out = json.loads(stdout.getvalue() or "{}")
         results = out.get("results") or []
-        self.assertEqual(len(results), 2)
-        self.assertTrue(all(r.get("source") == "engine" for r in results), results)
+        self.assertEqual(len(results), 0)
+        self.assertEqual(out.get("error"), "llm_disabled")
 
     def test_cli_ignores_invalid_line_entries(self) -> None:
         req = {
-            "config": {"llm": {"enabled": False}},
+            "config": {"llm": {"enabled": True, "endpoint": "mock://llm", "model": "mock", "max_lines_per_scan": 16}},
             "lines": [
                 {"lnum": 0, "text": "Valid line one."},
                 {"text": "missing line number"},

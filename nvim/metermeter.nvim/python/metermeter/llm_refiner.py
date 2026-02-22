@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -55,6 +56,8 @@ class LLMRefiner:
         self.endpoint = endpoint.strip()
         self.model = model.strip()
         self.api_key = api_key.strip()
+        self.last_error = ""
+        self.last_raw_response = ""
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -72,6 +75,28 @@ class LLMRefiner:
             "confidence is 0..1, analysis_hint <= 220 chars."
         )
 
+    def _debug_path(self) -> str:
+        path = os.environ.get("METERMETER_LLM_DEBUG_PATH", "").strip()
+        if path:
+            return path
+        return "/tmp/metermeter_llm_debug.json"
+
+    def _write_debug_dump(self, reason: str, payload: dict, raw: str = "") -> str:
+        path = self._debug_path()
+        out = {
+            "reason": reason,
+            "endpoint": self.endpoint,
+            "model": self.model,
+            "request_payload": payload,
+            "raw_response": raw,
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(out, fh, ensure_ascii=True)
+        except Exception:
+            return ""
+        return path
+
     def refine_lines(
         self,
         baselines: List[LineAnalysis],
@@ -80,6 +105,16 @@ class LLMRefiner:
     ) -> Dict[int, LLMRefinement]:
         if not baselines:
             return {}
+        if self.endpoint.startswith("mock://"):
+            out: Dict[int, LLMRefinement] = {}
+            for b in baselines:
+                out[int(b.line_no)] = LLMRefinement(
+                    meter_name=(b.meter_name or "").strip().lower(),
+                    confidence=max(0.0, min(1.0, float(b.confidence))),
+                    analysis_hint="mock",
+                    token_patterns=list(b.token_patterns or []),
+                )
+            return out
         timeout_s = max(0.2, float(timeout_ms) / 1000.0)
 
         lines = []
@@ -96,10 +131,12 @@ class LLMRefiner:
                 }
             )
 
+        # Scale completion budget with batch size to reduce truncation risk on strict JSON output.
+        max_tokens = min(3200, max(900, 220 * len(lines) + 300))
         payload = {
             "model": self.model,
             "temperature": max(0.0, min(1.0, float(temperature))),
-            "max_tokens": 900,
+            "max_tokens": max_tokens,
             "messages": [
                 {"role": "system", "content": self._system_prompt()},
                 {"role": "user", "content": json.dumps({"lines": lines}, ensure_ascii=True)},
@@ -117,24 +154,58 @@ class LLMRefiner:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
             raise RuntimeError(f"llm_http_error: {exc.code} {detail}")
+        self.last_raw_response = raw
 
-        data = json.loads(raw)
+        try:
+            data = json.loads(raw)
+        except Exception:
+            path = self._write_debug_dump("response_not_json", payload, raw)
+            msg = "llm_invalid_response: response_not_json"
+            if path:
+                msg += " (debug_dump={})".format(path)
+            self.last_error = msg
+            raise RuntimeError(msg)
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
-            return {}
+            path = self._write_debug_dump("missing_choices", payload, raw)
+            msg = "llm_invalid_response: missing_choices"
+            if path:
+                msg += " (debug_dump={})".format(path)
+            self.last_error = msg
+            raise RuntimeError(msg)
         msg = choices[0].get("message") if isinstance(choices[0], dict) else None
         if not isinstance(msg, dict):
-            return {}
+            path = self._write_debug_dump("missing_message", payload, raw)
+            err = "llm_invalid_response: missing_message"
+            if path:
+                err += " (debug_dump={})".format(path)
+            self.last_error = err
+            raise RuntimeError(err)
         content = msg.get("content")
         if not isinstance(content, str):
-            return {}
+            path = self._write_debug_dump("missing_content", payload, raw)
+            err = "llm_invalid_response: missing_content"
+            if path:
+                err += " (debug_dump={})".format(path)
+            self.last_error = err
+            raise RuntimeError(err)
 
         obj = _extract_json_obj(content)
         if obj is None:
-            return {}
+            path = self._write_debug_dump("content_not_json_object", payload, raw)
+            err = "llm_invalid_response: content_not_json_object"
+            if path:
+                err += " (debug_dump={})".format(path)
+            self.last_error = err
+            raise RuntimeError(err)
         results = obj.get("results")
         if not isinstance(results, list):
-            return {}
+            path = self._write_debug_dump("missing_results", payload, raw)
+            err = "llm_invalid_response: missing_results"
+            if path:
+                err += " (debug_dump={})".format(path)
+            self.last_error = err
+            raise RuntimeError(err)
 
         baseline_by_no = {int(b.line_no): b for b in baselines}
         out: Dict[int, LLMRefinement] = {}
@@ -155,12 +226,12 @@ class LLMRefiner:
 
             meter_name = item.get("meter_name") or item.get("final_meter") or ""
             if not isinstance(meter_name, str) or not meter_name.strip():
-                meter_name = base.meter_name
+                continue
             meter_name = meter_name.strip().lower()
 
             conf = item.get("confidence") or item.get("meter_confidence")
             if not isinstance(conf, (int, float)):
-                conf = base.confidence
+                continue
             conf = max(0.0, min(1.0, float(conf)))
 
             hint = item.get("analysis_hint") or ""
@@ -170,7 +241,7 @@ class LLMRefiner:
 
             token_patterns = item.get("token_stress_patterns") or item.get("token_patterns") or []
             if not isinstance(token_patterns, list) or len(token_patterns) != len(base.tokens):
-                token_patterns = base.token_patterns
+                continue
             normalized: List[str] = []
             ok = True
             for p in token_patterns:
@@ -183,7 +254,7 @@ class LLMRefiner:
                     break
                 normalized.append(p)
             if not ok or len(normalized) != len(base.tokens):
-                normalized = base.token_patterns
+                continue
 
             out[line_no] = LLMRefinement(
                 meter_name=meter_name,
@@ -192,5 +263,24 @@ class LLMRefiner:
                 token_patterns=normalized,
             )
 
-        return out
+        # Some models occasionally omit/garble one line in a batch even when others are valid.
+        # Retry missing lines individually to improve robustness without engine fallback.
+        if 0 < len(out) < len(baselines):
+            missing = [b for b in baselines if int(b.line_no) not in out]
+            for b in missing:
+                try:
+                    single = self.refine_lines([b], timeout_ms=timeout_ms, temperature=temperature)
+                    if int(b.line_no) in single:
+                        out[int(b.line_no)] = single[int(b.line_no)]
+                except Exception:
+                    continue
 
+        if not out:
+            path = self._write_debug_dump("results_failed_validation", payload, raw)
+            err = "llm_invalid_response: results_failed_validation"
+            if path:
+                err += " (debug_dump={})".format(path)
+            self.last_error = err
+            raise RuntimeError(err)
+        self.last_error = ""
+        return out

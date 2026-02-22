@@ -136,6 +136,7 @@ def main() -> int:
         analyses.append(a)
 
     refined: Dict[int, object] = {}
+    error_msg: Optional[str] = None
     llm_enabled = bool(llm_cfg.get("enabled", False))
     endpoint = str(llm_cfg.get("endpoint", "") or "").strip()
     model = str(llm_cfg.get("model", "") or "").strip()
@@ -143,28 +144,34 @@ def main() -> int:
     temp = float(llm_cfg.get("temperature", 0.1))
     max_llm = int(llm_cfg.get("max_lines_per_scan", 0))
 
-    if llm_enabled and endpoint and model and max_llm > 0 and analyses:
+    if not llm_enabled:
+        error_msg = "llm_disabled"
+    elif not endpoint or not model:
+        error_msg = "llm_not_configured: endpoint/model required"
+    elif max_llm <= 0:
+        error_msg = "llm_not_configured: max_lines_per_scan must be > 0"
+    elif analyses:
         try:
             refiner = LLMRefiner(endpoint=endpoint, model=model, api_key=str(llm_cfg.get("api_key", "") or ""))
             subset = analyses[: max_llm]
             refined = refiner.refine_lines(subset, timeout_ms=timeout_ms, temperature=temp)
-        except Exception:
-            refined = {}
+            if not refined:
+                error_msg = "llm_invalid_or_empty_response"
+        except Exception as exc:
+            error_msg = str(exc) or "llm_refine_failed"
 
     results: List[dict] = []
     for a in analyses:
+        if error_msg is not None:
+            continue
         r = refined.get(a.line_no)
-        meter_name = a.meter_name
-        conf = a.confidence
-        hint = ""
-        token_patterns = a.token_patterns
-        source = "engine"
-        if r is not None:
-            meter_name = getattr(r, "meter_name", meter_name) or meter_name
-            conf = getattr(r, "confidence", conf) or conf
-            hint = getattr(r, "analysis_hint", "") or ""
-            token_patterns = getattr(r, "token_patterns", token_patterns) or token_patterns
-            source = "llm"
+        if r is None:
+            continue
+        meter_name = getattr(r, "meter_name", "") or ""
+        conf = getattr(r, "confidence", 0.0) or 0.0
+        hint = getattr(r, "analysis_hint", "") or ""
+        token_patterns = getattr(r, "token_patterns", []) or []
+        source = "llm"
 
         spans = _stress_spans_for_line(a.source_text, token_patterns)
         results.append(
@@ -180,7 +187,10 @@ def main() -> int:
             }
         )
 
-    sys.stdout.write(json.dumps({"results": results}, ensure_ascii=True))
+    payload = {"results": results}
+    if error_msg is not None:
+        payload["error"] = error_msg
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True))
     return 0
 
 

@@ -77,7 +77,7 @@ class NvimLLMRefinerTests(unittest.TestCase):
         self.assertGreater(out[10].confidence, 0.9)
         self.assertEqual(out[10].token_patterns, ["U", "S", "U", "S"])
 
-    def test_invalid_token_patterns_fall_back_to_baseline(self) -> None:
+    def test_invalid_token_patterns_raise(self) -> None:
         baselines = [_baseline(1, "To strive to seek")]
 
         # Wrong lengths / bad characters should be rejected and baseline kept.
@@ -99,10 +99,8 @@ class NvimLLMRefinerTests(unittest.TestCase):
 
         with patch("urllib.request.urlopen", return_value=_Resp(response)):
             ref = LLMRefiner(endpoint="http://mock", model="mock")
-            out = ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
-
-        self.assertIn(1, out)
-        self.assertEqual(out[1].token_patterns, baselines[0].token_patterns)
+            with self.assertRaises(RuntimeError):
+                ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
 
     def test_parses_fenced_json_content(self) -> None:
         baselines = [_baseline(7, "To strive to seek")]
