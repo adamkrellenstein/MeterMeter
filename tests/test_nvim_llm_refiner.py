@@ -75,7 +75,7 @@ class NvimLLMRefinerTests(unittest.TestCase):
                         "line_no": 10,
                         "meter_name": "iambic dimeter",
                         "confidence": 0.92,
-                        "analysis_hint": "mock",
+
                         "token_stress_patterns": ["U", "S", "U", "S"],
                     }
                 ]
@@ -103,7 +103,7 @@ class NvimLLMRefinerTests(unittest.TestCase):
                         "line_no": 1,
                         "meter_name": "iambic dimeter",
                         "confidence": 0.9,
-                        "analysis_hint": "mock",
+
                         "token_stress_patterns": ["X", "S", "U", "S"],
                     }
                 ]
@@ -126,7 +126,7 @@ class NvimLLMRefinerTests(unittest.TestCase):
                         "line_no": 7,
                         "meter_name": "iambic dimeter",
                         "confidence": 0.71,
-                        "analysis_hint": "fenced",
+
                         "token_stress_patterns": ["U", "S", "U", "S"],
                     }
                 ]
@@ -140,11 +140,10 @@ class NvimLLMRefinerTests(unittest.TestCase):
             out = ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
 
         self.assertIn(7, out)
-        self.assertEqual(out[7].analysis_hint, "fenced")
+        self.assertAlmostEqual(out[7].confidence, 0.71, places=2)
 
-    def test_clamps_confidence_and_trims_hint(self) -> None:
+    def test_clamps_confidence(self) -> None:
         baselines = [_baseline(5, "To strive to seek")]
-        long_hint = "x " * 200
         content = json.dumps(
             {
                 "results": [
@@ -152,7 +151,6 @@ class NvimLLMRefinerTests(unittest.TestCase):
                         "line_no": 5,
                         "meter_name": "iambic dimeter",
                         "confidence": 9.0,
-                        "analysis_hint": long_hint,
                         "token_stress_patterns": ["U", "S", "U", "S"],
                     }
                 ]
@@ -167,7 +165,6 @@ class NvimLLMRefinerTests(unittest.TestCase):
 
         self.assertIn(5, out)
         self.assertLessEqual(out[5].confidence, 1.0)
-        self.assertLessEqual(len(out[5].analysis_hint), 220)
 
     def test_http_error_raises_runtime_error(self) -> None:
         baselines = [_baseline(3, "To strive to seek")]
@@ -193,7 +190,7 @@ class NvimLLMRefinerTests(unittest.TestCase):
                         "line_no": 9,
                         "meter_name": "iambs",
                         "confidence": 0.8,
-                        "analysis_hint": "norm",
+
                         "token_stress_patterns": ["U", "S", "U", "S"],
                     }
                 ]
@@ -218,7 +215,7 @@ class NvimLLMRefinerTests(unittest.TestCase):
                         "line_no": 12,
                         "meter_name": "iambic dimeter",
                         "confidence": 0.8,
-                        "analysis_hint": "bad",
+
                         "token_stress_patterns": ["UU", "S", "U", "S"],
                     }
                 ]
@@ -242,7 +239,7 @@ class NvimLLMRefinerTests(unittest.TestCase):
                         "line_no": 2,
                         "meter_name": "iambic dimeter",
                         "confidence": 0.8,
-                        "analysis_hint": "strict",
+
                         "token_stress_patterns": ["U.S", "S"],
                     }
                 ]
@@ -264,7 +261,7 @@ class NvimLLMRefinerTests(unittest.TestCase):
                         "line_no": 3,
                         "meter_name": "iambic dimeter",
                         "confidence": 0.8,
-                        "analysis_hint": "prod",
+
                         "token_stress_patterns": ["U.S", "S"],
                     }
                 ]
@@ -290,7 +287,7 @@ class NvimLLMRefinerTests(unittest.TestCase):
                         "line_no": 13,
                         "meter_name": "iambic dimeter",
                         "confidence": 0.84,
-                        "analysis_hint": "ctx",
+
                         "token_stress_patterns": ["U", "S", "U", "S"],
                     }
                 ]

@@ -3,7 +3,6 @@ local uv = vim.uv or vim.loop
 local M = {}
 local scanner = require("metermeter.scanner")
 local state_mod = require("metermeter.state")
-local render_mod = require("metermeter.render")
 
 local ns = vim.api.nvim_create_namespace("metermeter")
 
@@ -16,8 +15,6 @@ local DEFAULTS = {
     stress = true,
     meter_hints = true,
     meter_hint_confidence_levels = 6, -- number of discrete tint steps (>= 2)
-    show_analysis_hint = false,
-    analysis_hint_mode = "off", -- off|inline
     show_error_hint = true,
   },
 
@@ -67,11 +64,6 @@ local function plugin_root()
   local src = debug.getinfo(1, "S").source
   local path = src:sub(2) -- drop leading "@"
   return vim.fn.fnamemodify(path, ":p:h:h:h") -- .../lua/metermeter/init.lua -> plugin root
-end
-
-local function buf_path(bufnr)
-  local name = vim.api.nvim_buf_get_name(bufnr)
-  return name or ""
 end
 
 local function has_ft_token(bufnr, token)
@@ -136,15 +128,16 @@ local function _blend_rgb(a, b, t)
   return rr * 65536 + rg * 256 + rb
 end
 
+local function _clamp_levels()
+  local levels = tonumber(cfg.ui.meter_hint_confidence_levels) or 6
+  if levels < 2 then levels = 2 end
+  if levels > 12 then levels = 12 end
+  return levels
+end
+
 local function compute_eol_hls()
   -- Confidence-driven meter hint: more confident => closer to Normal, less confident => closer to Comment.
-  local levels = tonumber(cfg.ui.meter_hint_confidence_levels) or 6
-  if levels < 2 then
-    levels = 2
-  end
-  if levels > 12 then
-    levels = 12
-  end
+  local levels = _clamp_levels()
 
   local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = true }) or {}
   local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = true }) or {}
@@ -172,13 +165,7 @@ local function compute_eol_hls()
 end
 
 local function eol_hl_for_conf(conf)
-  local levels = tonumber(cfg.ui.meter_hint_confidence_levels) or 6
-  if levels < 2 then
-    levels = 2
-  end
-  if levels > 12 then
-    levels = 12
-  end
+  local levels = _clamp_levels()
   if type(conf) ~= "number" then
     return "MeterMeterEOL0"
   end
@@ -281,34 +268,6 @@ local function is_scan_line(bufnr, text)
     return s:match("\\$") ~= nil
   end
   return true
-end
-
-local function candidate_line_set_for_buf(bufnr)
-  return scanner.candidate_line_set_for_buf(bufnr, cfg.prefetch_lines)
-end
-
-local function viewport_signature(bufnr)
-  return scanner.viewport_signature(bufnr)
-end
-
-local function combine_lines(visible_lines, prefetch_lines)
-  return scanner.combine_lines(visible_lines, prefetch_lines)
-end
-
-local function all_scan_lines_for_buf(bufnr)
-  return scanner.all_scan_lines_for_buf(bufnr, is_scan_line)
-end
-
-local function subtract_lines(base_lines, remove_lines)
-  return scanner.subtract_lines(base_lines, remove_lines)
-end
-
-local function json_encode(x)
-  return vim.json.encode(x)
-end
-
-local function json_decode(s)
-  return vim.json.decode(s)
 end
 
 local function ensure_state(bufnr)
@@ -460,24 +419,14 @@ local function apply_results(bufnr, results)
     local lnum = tonumber(item.lnum)
     if lnum and vim.api.nvim_buf_is_valid(bufnr) then
       local label = item.label or ""
-      local hint = item.hint or ""
       local conf = item.confidence
       if type(conf) == "number" then
         label = tostring(item.meter_name or label or "")
       end
-      local show_hint = cfg.ui.show_analysis_hint and hint ~= ""
-      local hint_mode = tostring(cfg.ui.analysis_hint_mode or "off")
-      if cfg.ui.meter_hints and (label ~= "" or (show_hint and hint_mode == "inline")) then
+      if cfg.ui.meter_hints and label ~= "" then
         local hl = eol_hl_for_conf(conf)
-        local vt = {}
-        if label ~= "" then
-          table.insert(vt, { " " .. label, hl })
-        end
-        if show_hint and hint_mode == "inline" then
-          table.insert(vt, { "  " .. hint, "Comment" })
-        end
         vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, 0, {
-          virt_text = vt,
+          virt_text = { { " " .. label, hl } },
           -- Left-aligned, but starting in a consistent column across all annotated lines.
           virt_text_pos = "overlay",
           virt_text_win_col = eol_col,
@@ -537,7 +486,7 @@ end
 
 local function maybe_apply_results(bufnr, results)
   local st = ensure_state(bufnr)
-  local sig = render_mod.render_signature(st.cache_write_seq, results)
+  local sig = tostring(st.cache_write_seq or 0) .. ":" .. tostring(results and #results or 0)
   if sig == (st.last_render_sig or "") then
     return
   end
@@ -558,7 +507,7 @@ local function dominant_context_for_lines(bufnr, line_set)
       if is_scan_line(bufnr, text) then
         local key = _cache_key_for_text(st, text)
         local cached = _cache_get(st, key)
-        if cached and cached.source == "llm" and type(cached.meter_name) == "string" and cached.meter_name ~= "" then
+        if cached and type(cached.meter_name) == "string" and cached.meter_name ~= "" then
           local meter = string.lower(vim.trim(cached.meter_name))
           local conf = tonumber(cached.confidence) or 0.5
           conf = math.max(0.05, math.min(1.0, conf))
@@ -599,7 +548,7 @@ local function dominant_context_for_lines(bufnr, line_set)
   }
 end
 
-local function build_request(bufnr, ordered_lines, llm_enabled_override, require_llm_source, context)
+local function build_request(bufnr, ordered_lines, context)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
 
   local lines = {}
@@ -608,33 +557,15 @@ local function build_request(bufnr, ordered_lines, llm_enabled_override, require
   for _, lnum in ipairs(ordered_lines or {}) do
     if lnum >= 0 and lnum < line_count then
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
-      local ok = true
-      if ok and not is_scan_line(bufnr, text) then
-        ok = false
-      end
-      local key = _cache_key_for_text(st, text)
-      local cached = _cache_get(st, key)
-      if ok and cached then
-        if not require_llm_source then
-          ok = false
-        elseif cached.source == "llm" then
-          ok = false
-        end
-      end
-      if ok then
+      if is_scan_line(bufnr, text) and not _cache_get(st, _cache_key_for_text(st, text)) then
         table.insert(lines, { lnum = lnum, text = text })
       end
     end
   end
 
-  local llm_cfg = vim.deepcopy(cfg.llm)
-  if llm_enabled_override ~= nil then
-    llm_cfg.enabled = llm_enabled_override and true or false
-  end
-
   return {
     config = {
-      llm = llm_cfg,
+      llm = vim.deepcopy(cfg.llm),
       context = context or {},
       lexicon_path = cfg.lexicon_path or "",
       extra_lexicon_path = cfg.extra_lexicon_path or "",
@@ -655,8 +586,6 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
         text = item.text,
         meter_name = item.meter_name or "",
         confidence = item.confidence,
-        source = item.source or "llm",
-        hint = item.hint or "",
         token_patterns = item.token_patterns or {},
         stress_spans = item.stress_spans or {},
       })
@@ -666,8 +595,8 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
   local out = {}
   local line_set = ordered_lines
   if type(line_set) ~= "table" then
-    local visible_lines, prefetch_lines = candidate_line_set_for_buf(bufnr)
-    line_set = combine_lines(visible_lines, prefetch_lines)
+    local visible_lines, prefetch_lines = scanner.candidate_line_set_for_buf(bufnr, cfg.prefetch_lines)
+    line_set = scanner.combine_lines(visible_lines, prefetch_lines)
   end
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   for _, lnum in ipairs(line_set) do
@@ -677,23 +606,17 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
         local key = _cache_key_for_text(st, text)
         local cached = _cache_get(st, key)
         if cached then
-          if cached.source ~= "llm" then
-            goto continue_line
-          end
           table.insert(out, {
             lnum = lnum,
             text = text,
             meter_name = cached.meter_name or "",
             confidence = cached.confidence,
-            source = cached.source or "llm",
-            hint = cached.hint or "",
             token_patterns = cached.token_patterns or {},
             stress_spans = cached.stress_spans or {},
           })
         end
       end
     end
-    ::continue_line::
   end
   table.sort(out, function(a, b)
     return (a.lnum or 0) < (b.lnum or 0)
@@ -701,7 +624,7 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
   return out
 end
 
-local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chunk_size, llm_enabled, require_llm_source, context_fn, on_done)
+local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chunk_size, context_fn, on_done)
   local chunks = scanner.chunk_lines(lines or {}, chunk_size)
   local idx = 1
   local inflight = 0
@@ -736,16 +659,14 @@ local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chun
           context = built_ctx
         end
       end
-      local req = build_request(bufnr, chunks[idx], llm_enabled, require_llm_source, context)
+      local req = build_request(bufnr, chunks[idx], context)
       idx = idx + 1
       if #req.lines == 0 then
         goto continue
       end
 
       st.debug_cli_count = (tonumber(st.debug_cli_count) or 0) + 1
-      if llm_enabled then
-        st.debug_llm_cli_count = (tonumber(st.debug_llm_cli_count) or 0) + 1
-      end
+      st.debug_llm_cli_count = (tonumber(st.debug_llm_cli_count) or 0) + 1
       inflight = inflight + 1
       run_cli(req, function(resp, err)
         inflight = inflight - 1
@@ -761,12 +682,10 @@ local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chun
             finish_if_done()
             return
           end
-          if llm_enabled then
-            _llm_record_success(st2)
-          end
+          _llm_record_success(st2)
           local results = merge_cache_and_results(bufnr, resp, render_lines)
           maybe_apply_results(bufnr, results)
-        elseif err and llm_enabled then
+        elseif err then
           _llm_record_failure(st2, err)
           maybe_apply_results(bufnr, {})
         end
@@ -783,7 +702,7 @@ end
 
 run_cli = function(input, cb)
   local cmd = default_cli_cmd()
-  local text = json_encode(input)
+  local text = vim.json.encode(input)
   vim.system(cmd, { stdin = text, text = true }, function(res)
     -- vim.system callbacks run in a "fast event" context; bounce back to main loop.
     vim.schedule(function()
@@ -791,7 +710,7 @@ run_cli = function(input, cb)
         cb(nil, "cli exited " .. tostring(res.code) .. ": " .. (res.stderr or ""))
         return
       end
-      local ok, obj = pcall(json_decode, res.stdout or "")
+      local ok, obj = pcall(vim.json.decode, res.stdout or "")
       if not ok then
         cb(nil, "bad json from cli: " .. tostring(obj))
         return
@@ -819,7 +738,7 @@ local function do_scan(bufnr)
   end
 
   local changedtick = tonumber(vim.api.nvim_buf_get_changedtick(bufnr)) or 0
-  local view_sig = viewport_signature(bufnr)
+  local view_sig = scanner.viewport_signature(bufnr)
   if (not st.scan_running) and st.last_changedtick == changedtick and st.last_view_sig == view_sig then
     return
   end
@@ -835,10 +754,10 @@ local function do_scan(bufnr)
   st.scan_generation = (tonumber(st.scan_generation) or 0) + 1
   local gen = st.scan_generation
 
-  local visible_lines, prefetch_lines = candidate_line_set_for_buf(bufnr)
-  local prioritized_lines = combine_lines(visible_lines, prefetch_lines)
-  local all_scan_lines = all_scan_lines_for_buf(bufnr)
-  local background_lines = subtract_lines(all_scan_lines, prioritized_lines)
+  local visible_lines, prefetch_lines = scanner.candidate_line_set_for_buf(bufnr, cfg.prefetch_lines)
+  local prioritized_lines = scanner.combine_lines(visible_lines, prefetch_lines)
+  local all_scan_lines = scanner.all_scan_lines_for_buf(bufnr, is_scan_line)
+  local background_lines = scanner.subtract_lines(all_scan_lines, prioritized_lines)
   local render_lines = all_scan_lines
 
   -- Render cached results immediately (LLM-only) to avoid blank states during async work.
@@ -871,9 +790,9 @@ local function do_scan(bufnr)
     return dominant_context_for_lines(bufnr, all_scan_lines)
   end
 
-  run_chunk_phase(bufnr, gen, render_lines, visible_lines, llm_batch, true, true, context_fn, function()
-    run_chunk_phase(bufnr, gen, render_lines, prefetch_lines, llm_batch, true, true, context_fn, function()
-      run_chunk_phase(bufnr, gen, render_lines, background_lines, llm_batch, true, true, context_fn, function()
+  run_chunk_phase(bufnr, gen, render_lines, visible_lines, llm_batch, context_fn, function()
+    run_chunk_phase(bufnr, gen, render_lines, prefetch_lines, llm_batch, context_fn, function()
+      run_chunk_phase(bufnr, gen, render_lines, background_lines, llm_batch, context_fn, function()
         local st3 = ensure_state(bufnr)
         if st3.scan_generation == gen then
           st3.last_llm_changedtick = changedtick
@@ -885,16 +804,7 @@ local function do_scan(bufnr)
   end)
 end
 
-local function stop_scan_state(st)
-  state_mod.stop_scan_state(st)
-end
-
-local function cleanup_buf(bufnr)
-  local st = state_by_buf[bufnr]
-  if not st then
-    return
-  end
-  stop_scan_state(st)
+local function _cleanup_timers(st)
   if st.timer then
     st.timer:stop()
     st.timer:close()
@@ -905,6 +815,15 @@ local function cleanup_buf(bufnr)
     st.tick:close()
     st.tick = nil
   end
+end
+
+local function cleanup_buf(bufnr)
+  local st = state_by_buf[bufnr]
+  if not st then
+    return
+  end
+  state_mod.stop_scan_state(st)
+  _cleanup_timers(st)
   clear_buf(bufnr)
   state_by_buf[bufnr] = nil
 end
@@ -960,17 +879,8 @@ function M.disable(bufnr)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
   st.enabled = false
-  stop_scan_state(st)
-  if st.timer then
-    st.timer:stop()
-    st.timer:close()
-    st.timer = nil
-  end
-  if st.tick then
-    st.tick:stop()
-    st.tick:close()
-    st.tick = nil
-  end
+  state_mod.stop_scan_state(st)
+  _cleanup_timers(st)
   clear_buf(bufnr)
 end
 
@@ -1050,7 +960,7 @@ end
 function M.rescan(bufnr)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
-  stop_scan_state(st)
+  state_mod.stop_scan_state(st)
   schedule_scan(bufnr)
 end
 
@@ -1061,12 +971,12 @@ function M.dump_debug(bufnr)
   local out = {
     ts = os.time(),
     bufnr = bufnr,
-    file = buf_path(bufnr),
+    file = vim.api.nvim_buf_get_name(bufnr) or "",
     enabled = st.enabled,
     extmarks = marks,
   }
   local path = cfg.debug_dump_path or "/tmp/metermeter_nvim_dump.json"
-  local ok, enc = pcall(json_encode, out)
+  local ok, enc = pcall(vim.json.encode, out)
   if ok then
     local f = io.open(path, "w")
     if f then

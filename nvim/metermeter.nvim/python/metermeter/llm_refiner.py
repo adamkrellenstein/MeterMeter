@@ -25,7 +25,6 @@ LINE_NAME_BY_FEET = {v: k for k, v in VALID_FEET.items()}
 class LLMRefinement:
     meter_name: str
     confidence: float
-    analysis_hint: str
     token_patterns: List[str]
     meter_name_raw: str = ""
     meter_name_normalized: bool = False
@@ -102,7 +101,7 @@ class LLMRefiner:
             "Return ONLY strict JSON with this exact top-level shape: {\"results\":[...]}. "
             "Return exactly one result object per input line_no; do not omit any line. "
             "Each result must include: line_no (int), meter_name (string), confidence (0..1 number), "
-            "analysis_hint (<=220 chars), token_stress_patterns (list of strings). "
+            "token_stress_patterns (list of strings). "
             "token_stress_patterns length must equal token count, and each token pattern must contain only U/S "
             "with exact length equal to token_syllables for that token. "
             "Use canonical meter names when possible, e.g. 'iambic pentameter', "
@@ -154,6 +153,14 @@ class LLMRefiner:
         if path:
             return path
         return "/tmp/metermeter_llm_debug.json"
+
+    def _raise_invalid_response(self, reason: str, payload: dict, raw: str = "") -> None:
+        path = self._write_debug_dump(reason, payload, raw)
+        msg = "llm_invalid_response: " + reason
+        if path:
+            msg += " (debug_dump={})".format(path)
+        self.last_error = msg
+        raise RuntimeError(msg)
 
     def _write_debug_dump(self, reason: str, payload: dict, raw: str = "") -> str:
         path = self._debug_path()
@@ -219,7 +226,6 @@ class LLMRefiner:
                 out[int(b.line_no)] = LLMRefinement(
                     meter_name=(b.meter_name or "").strip().lower(),
                     confidence=max(0.0, min(1.0, float(b.confidence))),
-                    analysis_hint="mock",
                     token_patterns=list(b.token_patterns or []),
                     meter_name_raw=(b.meter_name or "").strip().lower(),
                     meter_name_normalized=False,
@@ -292,53 +298,23 @@ class LLMRefiner:
         try:
             data = json.loads(raw)
         except Exception:
-            path = self._write_debug_dump("response_not_json", payload, raw)
-            msg = "llm_invalid_response: response_not_json"
-            if path:
-                msg += " (debug_dump={})".format(path)
-            self.last_error = msg
-            raise RuntimeError(msg)
+            self._raise_invalid_response("response_not_json", payload, raw)
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
-            path = self._write_debug_dump("missing_choices", payload, raw)
-            msg = "llm_invalid_response: missing_choices"
-            if path:
-                msg += " (debug_dump={})".format(path)
-            self.last_error = msg
-            raise RuntimeError(msg)
+            self._raise_invalid_response("missing_choices", payload, raw)
         msg = choices[0].get("message") if isinstance(choices[0], dict) else None
         if not isinstance(msg, dict):
-            path = self._write_debug_dump("missing_message", payload, raw)
-            err = "llm_invalid_response: missing_message"
-            if path:
-                err += " (debug_dump={})".format(path)
-            self.last_error = err
-            raise RuntimeError(err)
+            self._raise_invalid_response("missing_message", payload, raw)
         content = msg.get("content")
         if not isinstance(content, str):
-            path = self._write_debug_dump("missing_content", payload, raw)
-            err = "llm_invalid_response: missing_content"
-            if path:
-                err += " (debug_dump={})".format(path)
-            self.last_error = err
-            raise RuntimeError(err)
+            self._raise_invalid_response("missing_content", payload, raw)
 
         obj = _extract_json_obj(content)
         if obj is None:
-            path = self._write_debug_dump("content_not_json_object", payload, raw)
-            err = "llm_invalid_response: content_not_json_object"
-            if path:
-                err += " (debug_dump={})".format(path)
-            self.last_error = err
-            raise RuntimeError(err)
+            self._raise_invalid_response("content_not_json_object", payload, raw)
         results = obj.get("results")
         if not isinstance(results, list):
-            path = self._write_debug_dump("missing_results", payload, raw)
-            err = "llm_invalid_response: missing_results"
-            if path:
-                err += " (debug_dump={})".format(path)
-            self.last_error = err
-            raise RuntimeError(err)
+            self._raise_invalid_response("missing_results", payload, raw)
 
         baseline_by_no = {int(b.line_no): b for b in baselines}
         out: Dict[int, LLMRefinement] = {}
@@ -371,11 +347,6 @@ class LLMRefiner:
             if not isinstance(conf, (int, float)):
                 continue
             conf = max(0.0, min(1.0, float(conf)))
-
-            hint = item.get("analysis_hint") or ""
-            if not isinstance(hint, str):
-                hint = ""
-            hint = " ".join(hint.split())[:220]
 
             token_patterns = item.get("token_stress_patterns") or item.get("token_patterns") or []
             if not isinstance(token_patterns, list):
@@ -425,7 +396,6 @@ class LLMRefiner:
             out[line_no] = LLMRefinement(
                 meter_name=meter_name,
                 confidence=conf,
-                analysis_hint=hint,
                 token_patterns=normalized,
                 meter_name_raw=meter_name_raw,
                 meter_name_normalized=meter_name_normalized,
@@ -452,11 +422,6 @@ class LLMRefiner:
                     continue
 
         if not out:
-            path = self._write_debug_dump("results_failed_validation", payload, raw)
-            err = "llm_invalid_response: results_failed_validation"
-            if path:
-                err += " (debug_dump={})".format(path)
-            self.last_error = err
-            raise RuntimeError(err)
+            self._raise_invalid_response("results_failed_validation", payload, raw)
         self.last_error = ""
         return out

@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from .heuristics import FUNCTION_WORDS, clean_word, estimate_stress_pattern, estimate_syllables
+from .heuristics import FUNCTION_WORDS, _build_pattern, clean_word, estimate_stress_pattern, estimate_syllables
 
 TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 
@@ -66,6 +66,10 @@ CONF_SCORE_WEIGHT = 0.72               # Best meter score.
 CONF_MARGIN_WEIGHT = 0.20              # Margin over second-best.
 CONF_OOV_WEIGHT = 0.08                 # Penalty for out-of-vocabulary tokens.
 
+def _is_valid_pattern(p: object) -> bool:
+    return isinstance(p, str) and bool(p) and set(p).issubset({"U", "S"})
+
+
 def _load_builtin_lexicon() -> Dict[str, List[str]]:
     path = os.path.join(os.path.dirname(__file__), "builtin_lexicon.json")
     if not os.path.exists(path):
@@ -76,10 +80,7 @@ def _load_builtin_lexicon() -> Dict[str, List[str]]:
     for k, v in raw.items():
         if not isinstance(k, str) or not isinstance(v, list):
             continue
-        clean = []
-        for p in v:
-            if isinstance(p, str) and p and set(p).issubset({"U", "S"}):
-                clean.append(p)
+        clean = [p for p in v if _is_valid_pattern(p)]
         if clean:
             out[k.lower()] = clean
     return out
@@ -100,8 +101,6 @@ class LineAnalysis:
     oov_tokens: List[str]
     debug_scores: Dict[str, float]
     token_patterns: List[str] = field(default_factory=list)
-    analysis_hint: str = ""
-    source: str = "engine"
 
 
 class MeterEngine:
@@ -129,7 +128,7 @@ class MeterEngine:
         for word, patterns in raw.items():
             if not isinstance(patterns, list):
                 continue
-            clean_patterns = [p for p in patterns if isinstance(p, str) and p and set(p).issubset({"U", "S"})]
+            clean_patterns = [p for p in patterns if _is_valid_pattern(p)]
             if clean_patterns:
                 out[word.lower()] = clean_patterns
         return out
@@ -137,26 +136,7 @@ class MeterEngine:
     def tokenize(self, line: str) -> List[str]:
         return TOKEN_RE.findall(line)
 
-    def _lookup_word_pattern(self, word: str) -> Tuple[str, bool]:
-        key = word.lower()
-        builtin = BUILTIN_WORD_PATTERNS.get(key)
-        if builtin:
-            return builtin[0], True
-
-        key = word.lower()
-        patterns = self.word_patterns.get(key)
-        if patterns:
-            return patterns[0], True
-
-        if key.endswith("'s"):
-            base = key[:-2]
-            patterns = self.word_patterns.get(base)
-            if patterns:
-                return patterns[0], True
-
-        return estimate_stress_pattern(word), False
-
-    def _lookup_word_patterns(self, word: str) -> Tuple[List[str], bool]:
+    def _resolve_word_entries(self, word: str) -> Tuple[List[str], bool]:
         key = word.lower()
         builtin = BUILTIN_WORD_PATTERNS.get(key)
         if builtin:
@@ -177,16 +157,8 @@ class MeterEngine:
     def _is_function_word(self, word: str) -> bool:
         return clean_word(word) in FUNCTION_WORDS
 
-    def _single_stress_pattern(self, syllables: int, stress_idx: int) -> str:
-        if syllables <= 0:
-            return ""
-        stress_idx = max(0, min(stress_idx, syllables - 1))
-        pats = ["U"] * syllables
-        pats[stress_idx] = "S"
-        return "".join(pats)
-
     def _token_pattern_options(self, token: str) -> Tuple[List[Tuple[str, float]], bool]:
-        direct, found = self._lookup_word_patterns(token)
+        direct, found = self._resolve_word_entries(token)
         options: List[Tuple[str, float]] = []
         seen = set()
         for pat in direct:
@@ -213,7 +185,7 @@ class MeterEngine:
             return [("S", 0.0), ("U", 0.25)], False
 
         for idx in range(syllables):
-            pat = self._single_stress_pattern(syllables, idx)
+            pat = _build_pattern(syllables, idx)
             if pat in seen:
                 continue
             seen.add(pat)
@@ -455,7 +427,8 @@ class MeterEngine:
         # First pass: approximate pattern for rough candidate generation.
         approx_patterns: List[str] = []
         for token in tokens:
-            pattern, _ = self._lookup_word_pattern(token)
+            entries, found = self._resolve_word_entries(token)
+            pattern = entries[0] if entries else (estimate_stress_pattern(token) if not found else "")
             if pattern:
                 approx_patterns.append(pattern)
         if not approx_patterns:

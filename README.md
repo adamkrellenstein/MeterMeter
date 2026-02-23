@@ -37,8 +37,6 @@ Pipeline behavior is LLM-first and LLM-required:
 
 - Refines meter label + confidence when context suggests better line-level scansion.
 - Refines per-token stress patterns (used for stress highlighting).
-- Optionally provides short poetic notes (`analysis_hint`) when enabled in UI settings.
-
 ### Deterministic Layer
 
 - Used for tokenization/syllable scaffolding and rendering guardrails.
@@ -211,8 +209,6 @@ require("metermeter").setup({ ... })
 
 | Option | Default | What it does | Why it exists |
 |---|---:|---|---|
-| `ui.show_analysis_hint` | `false` | Enables display of optional LLM poetic note text. | Keeps default UI minimal while allowing richer feedback when requested. |
-| `ui.analysis_hint_mode` | `"off"` | Hint display mode: `off` or `inline`. | Lets users choose whether notes should affect layout/visual density. |
 | `cache.max_entries` | `5000` | Max number of cached analysis entries per buffer (LRU-style eviction). | Prevents unbounded memory growth in long sessions. |
 | `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path used by `:MeterMeterDump`. | Fast, file-based debugging without requiring interactive logging hooks. |
 | `llm.max_lines_per_scan` | `2` | Max lines sent to LLM per scan chunk (each scan phase chunks lines by this value). | Controls latency/cost and keeps editor responsiveness stable. |

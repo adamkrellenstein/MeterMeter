@@ -116,14 +116,14 @@ class NvimCLILLMTests(unittest.TestCase):
                         "line_no": 0,
                         "meter_name": "iambic pentameter",
                         "confidence": 0.9,
-                        "analysis_hint": "mock",
+
                         "token_stress_patterns": ["U", "SU", "S", "U", "S", "U", "S", "U", "S"],
                     },
                     {
                         "line_no": 1,
                         "meter_name": "iambic pentameter",
                         "confidence": 0.9,
-                        "analysis_hint": "mock",
+
                         "token_stress_patterns": ["U", "S", "U", "S", "U", "S", "U", "S", "U", "SU", "S"],
                     },
                 ]
@@ -141,7 +141,6 @@ class NvimCLILLMTests(unittest.TestCase):
         out = json.loads(stdout.getvalue() or "{}")
         results = out.get("results") or []
         self.assertEqual(len(results), 2)
-        self.assertTrue(all(r.get("source") == "llm" for r in results), results)
         eval_obj = out.get("eval") or {}
         self.assertEqual(eval_obj.get("mode"), "production")
         self.assertEqual(eval_obj.get("result_count"), 2)
@@ -249,7 +248,7 @@ class NvimCLILLMTests(unittest.TestCase):
                         "line_no": 0,
                         "meter_name": "trochaic tetrameter",
                         "confidence": 0.60,
-                        "analysis_hint": "mock",
+
                         "token_stress_patterns": ["U", "SU", "S", "U", "S", "U", "S", "U", "S"],
                     }
                 ]

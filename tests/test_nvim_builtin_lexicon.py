@@ -26,6 +26,6 @@ class BuiltinLexiconTests(unittest.TestCase):
             "nourish'd": "SU",
         }
         for word, expected in cases.items():
-            pat, found = engine._lookup_word_pattern(word)
+            entries, found = engine._resolve_word_entries(word)
             self.assertTrue(found, f"expected builtin lexicon hit for {word}")
-            self.assertEqual(pat, expected)
+            self.assertEqual(entries[0], expected)

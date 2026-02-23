@@ -53,35 +53,16 @@ def _load_word_patterns_from_path(path: str) -> Dict[str, List[str]]:
     return out
 
 
-def _resolve_lexicon_path(path: str) -> str:
+def _resolve_path(path: str, env_var: str, fallback_filenames: List[str]) -> str:
     path = os.path.expanduser(str(path or "").strip())
     if path and os.path.exists(path):
         return path
-    env_path = os.environ.get("METERMETER_LEXICON_PATH", "").strip()
+    env_path = os.environ.get(env_var, "").strip()
     if env_path and os.path.exists(env_path):
         return env_path
     home = os.path.expanduser("~")
-    for candidate in [
-        os.path.join(home, ".metermeter", "cmudict.json.gz"),
-        os.path.join(home, ".metermeter", "cmudict.json"),
-    ]:
-        if os.path.exists(candidate):
-            return candidate
-    return path
-
-
-def _resolve_extra_lexicon_path(path: str) -> str:
-    path = os.path.expanduser(str(path or "").strip())
-    if path and os.path.exists(path):
-        return path
-    env_path = os.environ.get("METERMETER_EXTRA_LEXICON_PATH", "").strip()
-    if env_path and os.path.exists(env_path):
-        return env_path
-    home = os.path.expanduser("~")
-    for candidate in [
-        os.path.join(home, ".metermeter", "extra_lexicon.json.gz"),
-        os.path.join(home, ".metermeter", "extra_lexicon.json"),
-    ]:
+    for name in fallback_filenames:
+        candidate = os.path.join(home, ".metermeter", name)
         if os.path.exists(candidate):
             return candidate
     return path
@@ -93,8 +74,8 @@ def _even_spans(length: int, target: int) -> List[Tuple[int, int]]:
     target = max(1, min(int(target), int(length)))
     out: List[Tuple[int, int]] = []
     for idx in range(target):
-        start = int((idx * length) / float(target))
-        end = int(((idx + 1) * length) / float(target))
+        start = (idx * length) // target
+        end = ((idx + 1) * length) // target
         if end <= start:
             end = min(length, start + 1)
         out.append((start, end))
@@ -258,9 +239,9 @@ def _try_dominant_smoothing(
         dom_score is not None
         and cur_score is not None
         and conf <= DOMINANT_LOW_CONF
-        and float(dom_score) >= (float(cur_score) + DOMINANT_SCORE_DELTA)
+        and dom_score >= (cur_score + DOMINANT_SCORE_DELTA)
     ):
-        return dominant_meter, min(conf, float(dom_score)), "dominant_smoothing"
+        return dominant_meter, min(conf, dom_score), "dominant_smoothing"
     return None
 
 
@@ -303,15 +284,10 @@ def main() -> int:
     context_cfg = (config.get("context") or {}) if isinstance(config, dict) else {}
     lexicon_path_cfg = str(config.get("lexicon_path") or "").strip() if isinstance(config, dict) else ""
     extra_lexicon_path_cfg = str(config.get("extra_lexicon_path") or "").strip() if isinstance(config, dict) else ""
-    lexicon_required = bool(lexicon_path_cfg)
-    lexicon_path = _resolve_lexicon_path(lexicon_path_cfg)
-    extra_lexicon_path = _resolve_extra_lexicon_path(extra_lexicon_path_cfg)
+    lexicon_path = _resolve_path(lexicon_path_cfg, "METERMETER_LEXICON_PATH", ["cmudict.json.gz", "cmudict.json"])
+    extra_lexicon_path = _resolve_path(extra_lexicon_path_cfg, "METERMETER_EXTRA_LEXICON_PATH", ["extra_lexicon.json.gz", "extra_lexicon.json"])
 
     error_msg: Optional[str] = None
-
-    if lexicon_required and (not lexicon_path or not os.path.exists(lexicon_path)):
-        error_msg = "lexicon_missing: {}".format(lexicon_path_cfg)
-        lexicon_path = ""
 
     engine = MeterEngine(dict_path=lexicon_path or None)
     if extra_lexicon_path:
@@ -344,9 +320,7 @@ def main() -> int:
     if eval_mode not in {"production", "strict"}:
         eval_mode = "production"
 
-    if error_msg is not None:
-        pass
-    elif not llm_enabled:
+    if not llm_enabled:
         error_msg = "llm_disabled"
     elif not endpoint or not model:
         error_msg = "llm_not_configured: endpoint/model required"
@@ -361,7 +335,7 @@ def main() -> int:
                 timeout_ms=timeout_ms,
                 temperature=temp,
                 eval_mode=eval_mode,
-                context=context_cfg if isinstance(context_cfg, dict) else {},
+                context=context_cfg,
             )
             if not refined:
                 error_msg = "llm_invalid_or_empty_response"
@@ -399,9 +373,7 @@ def main() -> int:
         token_repairs_applied = int(getattr(r, "token_repairs_applied", 0) or 0)
         strict_eval_result = bool(getattr(r, "strict_eval", False))
         conf = getattr(r, "confidence", 0.0) or 0.0
-        hint = getattr(r, "analysis_hint", "") or ""
         token_patterns = getattr(r, "token_patterns", []) or []
-        source = "llm"
         if meter_name_normalized:
             meter_normalizations += 1
         if token_repairs_applied > 0:
@@ -409,7 +381,7 @@ def main() -> int:
 
         stress_pattern = "".join(p for p in token_patterns if isinstance(p, str))
         pattern_best_meter, pattern_best_score, pattern_debug = engine.best_meter_for_stress_pattern(stress_pattern)
-        pattern_best_margin = float(pattern_debug.get("margin") or 0.0)
+        pattern_best_margin = pattern_debug.get("margin") or 0.0
         baseline_meter = (a.meter_name or "").strip().lower()
         baseline_conf = float(getattr(a, "confidence", 0.0) or 0.0)
         meter_overridden = False
@@ -445,8 +417,6 @@ def main() -> int:
                 "meter_name_raw": meter_name_raw,
                 "meter_name_normalized": meter_name_normalized,
                 "confidence": float(conf),
-                "source": source,
-                "hint": hint,
                 "token_patterns": token_patterns,
                 "stress_spans": spans,
                 "token_repairs_applied": token_repairs_applied,
@@ -454,8 +424,8 @@ def main() -> int:
                 "meter_overridden": meter_overridden,
                 "override_reason": override_reason,
                 "pattern_best_meter": pattern_best_meter,
-                "pattern_best_score": float(pattern_best_score),
-                "pattern_best_margin": float(pattern_best_margin),
+                "pattern_best_score": pattern_best_score,
+                "pattern_best_margin": pattern_best_margin,
             }
         )
 
