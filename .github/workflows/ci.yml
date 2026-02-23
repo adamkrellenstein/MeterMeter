@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
           brew update
           brew install neovim
-          /tmp/nvim-linux64/bin/nvim --version | head -n 1
+          nvim --version | head -n 1
 
       - name: Run smoke + unit tests
         shell: bash
