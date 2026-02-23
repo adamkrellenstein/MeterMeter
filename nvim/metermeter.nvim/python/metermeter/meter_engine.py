@@ -344,13 +344,29 @@ class MeterEngine:
             return "", 0.0, {"margin": 0.0}
         rescored.sort(key=lambda item: item[2], reverse=True)
         best_name, best_feet, best_score = rescored[0]
-        second_score = rescored[1][2] if len(rescored) > 1 else 0.0
+        iambic_bias = False
+        if 9 <= len(pattern) <= 11:
+            iambic_score = self._score_pattern_for_meter(pattern, "iambic", 5)
+            if (
+                iambic_score is not None
+                and (best_name != "iambic" or best_feet != 5)
+                and iambic_score >= (best_score - 0.10)
+            ):
+                best_name, best_feet, best_score = "iambic", 5, iambic_score
+                iambic_bias = True
+        second_score = 0.0
+        for name, feet, score in rescored:
+            if name == best_name and feet == best_feet:
+                continue
+            if score > second_score:
+                second_score = score
         margin = max(0.0, best_score - second_score)
         line_name = LINE_NAME_BY_FEET.get(best_feet, f"{best_feet}-foot")
         meter_name = f"{best_name} {line_name}"
         debug = {
             "margin": margin,
             "second_score": second_score,
+            "iambic_bias": iambic_bias,
         }
         for i, (name, feet, score) in enumerate(rescored[:4], start=1):
             debug[f"top{i}_{name}_{feet}"] = score
@@ -473,7 +489,24 @@ class MeterEngine:
 
         refined.sort(key=lambda item: item[2], reverse=True)
         best_name, best_feet, best_score, stress_pattern, best_token_patterns, oov_tokens = refined[0]
-        second_score = refined[1][2] if len(refined) > 1 else 0.0
+        syllable_len = len(stress_pattern)
+        iambic_bias = False
+        if 9 <= syllable_len <= 11:
+            for name, feet, score, sp, tok_pats, oov in refined:
+                if name == "iambic" and feet == 5:
+                    if score >= (best_score - 0.10) and (name != best_name or feet != best_feet):
+                        best_name, best_feet, best_score = name, feet, score
+                        stress_pattern = sp
+                        best_token_patterns = tok_pats
+                        oov_tokens = oov
+                        iambic_bias = True
+                    break
+        second_score = 0.0
+        for name, feet, score, _, _, _ in refined:
+            if name == best_name and feet == best_feet:
+                continue
+            if score > second_score:
+                second_score = score
         margin = max(0.0, best_score - second_score)
         oov_ratio = len(oov_tokens) / float(len(tokens)) if tokens else 0.0
 
@@ -484,6 +517,8 @@ class MeterEngine:
         meter_name = f"{best_name} {line_name}"
 
         debug_scores = {f"{name}:{feet}": score for name, feet, score, _, _, _ in refined[:6]}
+        if iambic_bias:
+            debug_scores["bias:iambic"] = best_score
 
         return LineAnalysis(
             line_no=line_no,

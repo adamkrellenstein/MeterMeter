@@ -209,6 +209,7 @@ The repository uses a layered regression strategy:
   - Stress-span correctness and clipping behavior.
 - LLM parsing/validation behavior with mocked responses.
 - Deterministic stress-pattern rescoring tests (meter-template consistency).
+- Non-iambic template regression tests (trochaic/anapestic/dactylic stress patterns).
 - Canonical meter accuracy floors on Shakespeare fixtures:
   - Sonnet 18
   - Sonnet 116
@@ -243,6 +244,12 @@ export METERMETER_LLM_MODEL="qwen2.5:7b-instruct"
 ./scripts/run_llm_integration_tests.sh
 ```
 
+For extended corpora (more sonnets + non-iambic meters + iambic tetrameter), enable:
+
+```bash
+export METERMETER_LLM_EXTENDED=1
+```
+
 `tests/test_nvim_llm_integration.py` is intentionally skipped unless `METERMETER_LLM_INTEGRATION=1`.
 It validates real-model output and enforces integration floors on:
 - Sonnet 18 (iambic pentameter)
@@ -250,6 +257,13 @@ It validates real-model output and enforces integration floors on:
 - Sonnet 130 (iambic pentameter)
 - Milton, *On His Blindness* (iambic pentameter)
 - Whitman opening excerpt (free-verse anti-collapse guard)
+- Scansion quality floor on strict iambic lines (token-level stress pattern match)
+Extended suite adds:
+- Sonnet 29 + Sonnet 73 (iambic pentameter)
+- Trochaic tetrameter (Longfellow)
+- Anapestic tetrameter ("Night Before Christmas")
+- Dactylic hexameter (Longfellow, *Evangeline*)
+- Iambic tetrameter (Frost, *Stopping by Woods* opening stanza)
 
 For raw-model benchmarking (no normalization/repair), set:
 

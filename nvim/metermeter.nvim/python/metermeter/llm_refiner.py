@@ -91,9 +91,14 @@ class LLMRefiner:
             "You are an expert in English poetic meter and scansion. "
             "Analyze stress at the whole-line level, not per-word dictionary stress in isolation. "
             "Use each line's baseline_meter and baseline_confidence as priors; do not deviate unless strong evidence supports it. "
+            "Common substitutions (initial trochee, spondee, feminine ending) do NOT change the overall meter label; "
+            "keep 'iambic pentameter' unless the line consistently fits another meter. "
             + dominant_clause
             + "For lines with 9-11 syllables, pentameter is the default unless stress pattern strongly conflicts. "
             "Do NOT output a single U/S per token; expand each token to match token_syllables exactly. "
+            "token_stress_patterns must use ONLY 'U' and 'S' characters (no separators like '/', '-', '.'). "
+            "Example: token_syllables [1,2] -> token_stress_patterns [\"U\",\"US\"]. "
+            "If unsure, copy baseline_token_patterns exactly (same length as token_syllables). "
             "Return ONLY strict JSON with this exact top-level shape: {\"results\":[...]}. "
             "Return exactly one result object per input line_no; do not omit any line. "
             "Each result must include: line_no (int), meter_name (string), confidence (0..1 number), "
@@ -233,6 +238,7 @@ class LLMRefiner:
                     "line_text": b.source_text,
                     "tokens": b.tokens,
                     "token_syllables": token_syllables,
+                    "baseline_token_patterns": list(b.token_patterns or []),
                     "baseline_meter": b.meter_name,
                     "baseline_confidence": float(b.confidence),
                 }

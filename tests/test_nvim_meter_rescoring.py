@@ -21,6 +21,27 @@ class MeterRescoringTests(unittest.TestCase):
         self.assertGreaterEqual(score, 0.80)
         self.assertGreaterEqual(float(debug.get("margin") or 0.0), 0.05)
 
+    def test_best_meter_for_trochaic_pattern(self) -> None:
+        engine = MeterEngine()
+        meter, score, debug = engine.best_meter_for_stress_pattern("SUSUSUSU")
+        self.assertEqual(meter, "trochaic tetrameter")
+        self.assertGreaterEqual(score, 0.75)
+        self.assertGreaterEqual(float(debug.get("margin") or 0.0), 0.03)
+
+    def test_best_meter_for_anapestic_pattern(self) -> None:
+        engine = MeterEngine()
+        meter, score, debug = engine.best_meter_for_stress_pattern("UUSUUSUUSUUS")
+        self.assertEqual(meter, "anapestic tetrameter")
+        self.assertGreaterEqual(score, 0.72)
+        self.assertGreaterEqual(float(debug.get("margin") or 0.0), 0.03)
+
+    def test_best_meter_for_dactylic_pattern(self) -> None:
+        engine = MeterEngine()
+        meter, score, debug = engine.best_meter_for_stress_pattern("SUUSUUSUUSUUSUUSUUS")
+        self.assertEqual(meter, "dactylic hexameter")
+        self.assertGreaterEqual(score, 0.72)
+        self.assertGreaterEqual(float(debug.get("margin") or 0.0), 0.03)
+
     def test_score_stress_pattern_for_specific_meter(self) -> None:
         engine = MeterEngine()
         iambic = engine.score_stress_pattern_for_meter("USUSUSUSUS", "iambic pentameter")

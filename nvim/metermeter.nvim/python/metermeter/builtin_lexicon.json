@@ -62,5 +62,18 @@
   "flower": ["S", "SU"],
   "fiery": ["SU", "SUU"],
   "spirit": ["SU"],
-  "heaven": ["S", "SU"]
+  "heaven": ["S", "SU"],
+  "heav'n": ["S"],
+  "heav'nly": ["SU"],
+  "e'er": ["S"],
+  "ne'er": ["S"],
+  "e'en": ["S"],
+  "ev'n": ["S"],
+  "see'st": ["S"],
+  "possess'd": ["US"],
+  "remember'd": ["USU"],
+  "ruin'd": ["SU"],
+  "nourish'd": ["SU"],
+  "fadeth": ["SU"],
+  "whereon": ["US"]
 }

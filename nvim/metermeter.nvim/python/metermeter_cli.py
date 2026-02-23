@@ -14,6 +14,11 @@ VOWEL_GROUP_RE = re.compile(r"[AEIOUYaeiouy]+")
 
 RESCORE_MIN_SCORE = 0.72
 RESCORE_MIN_MARGIN = 0.10
+IAMBIC_GUARD_MIN_SCORE = 0.68
+IAMBIC_GUARD_MIN_MARGIN = 0.03
+IAMBIC_GUARD_MAX_CONF = 0.75
+BASELINE_GUARD_CONF_MIN = 0.75
+BASELINE_GUARD_LLM_MAX_CONF = 0.85
 DOMINANT_RATIO_MIN = 0.75
 DOMINANT_MIN_LINES = 6
 DOMINANT_LOW_CONF = 0.65
@@ -334,6 +339,35 @@ def main() -> int:
             conf = min(float(conf), float(pattern_best_score))
             meter_overridden = True
             override_reason = "pattern_rescore"
+
+        if (
+            not meter_overridden
+            and pattern_best_meter == "iambic pentameter"
+            and meter_name != pattern_best_meter
+            and 9 <= len(stress_pattern) <= 11
+            and pattern_best_score >= IAMBIC_GUARD_MIN_SCORE
+            and pattern_best_margin >= IAMBIC_GUARD_MIN_MARGIN
+            and float(conf) <= IAMBIC_GUARD_MAX_CONF
+        ):
+            meter_name = pattern_best_meter
+            conf = min(float(conf), float(pattern_best_score))
+            meter_overridden = True
+            override_reason = "iambic_guard"
+
+        baseline_meter = (a.meter_name or "").strip().lower()
+        baseline_conf = float(getattr(a, "confidence", 0.0) or 0.0)
+        if (
+            not meter_overridden
+            and baseline_meter == "iambic pentameter"
+            and meter_name != baseline_meter
+            and 9 <= len(stress_pattern) <= 11
+            and baseline_conf >= BASELINE_GUARD_CONF_MIN
+            and float(conf) <= BASELINE_GUARD_LLM_MAX_CONF
+        ):
+            meter_name = baseline_meter
+            conf = min(float(conf), baseline_conf)
+            meter_overridden = True
+            override_reason = "baseline_guard"
 
         can_apply_dominant = (
             dominant_meter
