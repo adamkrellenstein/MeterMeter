@@ -102,8 +102,11 @@ jobs:
           path: ~/.ollama/models
           key: ollama-models-qwen2.5-7b-instruct
 
-      - name: Pull model
-        run: ollama pull qwen2.5:7b-instruct
+      - name: Start Ollama and pull model
+        run: |
+          ollama serve &
+          sleep 2
+          ollama pull qwen2.5:7b-instruct
 
       - name: Run LLM integration tests
         shell: bash
