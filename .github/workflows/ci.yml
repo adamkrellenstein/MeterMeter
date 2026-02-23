@@ -79,3 +79,9 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/run_smoke_tests.sh
+
+      - name: Run LLM integration tests (auto-skip without endpoint)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/run_llm_integration_tests.sh

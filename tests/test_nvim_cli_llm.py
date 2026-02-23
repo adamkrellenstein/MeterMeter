@@ -272,3 +272,42 @@ class NvimCLILLMTests(unittest.TestCase):
         self.assertTrue(row.get("meter_overridden"))
         self.assertEqual(row.get("override_reason"), "pattern_rescore")
         self.assertEqual((out.get("eval") or {}).get("meter_overrides"), 1)
+
+    def test_resolve_path_explicit_path(self) -> None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as fh:
+            fh.write(b"{}")
+            path = fh.name
+        try:
+            result = metermeter_cli._resolve_path(path, "UNUSED_ENV_VAR", [])
+            self.assertEqual(result, path)
+        finally:
+            os.unlink(path)
+
+    def test_resolve_path_env_fallback(self) -> None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as fh:
+            fh.write(b"{}")
+            path = fh.name
+        try:
+            with patch.dict(os.environ, {"TEST_RESOLVE_PATH_ENV": path}):
+                result = metermeter_cli._resolve_path("", "TEST_RESOLVE_PATH_ENV", [])
+            self.assertEqual(result, path)
+        finally:
+            os.unlink(path)
+
+    def test_resolve_path_home_fallback(self) -> None:
+        home = os.path.expanduser("~")
+        mm_dir = os.path.join(home, ".metermeter")
+        os.makedirs(mm_dir, exist_ok=True)
+        sentinel = os.path.join(mm_dir, "_test_resolve_sentinel.json")
+        try:
+            with open(sentinel, "w") as f:
+                f.write("{}")
+            result = metermeter_cli._resolve_path("", "NONEXISTENT_ENV_VAR_1234", ["_test_resolve_sentinel.json"])
+            self.assertEqual(result, sentinel)
+        finally:
+            if os.path.exists(sentinel):
+                os.unlink(sentinel)
+
+    def test_resolve_path_returns_original_when_nothing_found(self) -> None:
+        result = metermeter_cli._resolve_path("~/nonexistent_path_xyz", "NONEXISTENT_ENV_VAR_1234", ["no_such_file.json"])
+        self.assertEqual(result, os.path.expanduser("~/nonexistent_path_xyz"))

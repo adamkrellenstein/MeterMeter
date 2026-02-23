@@ -11,7 +11,6 @@ nvim --headless -u NONE -i NONE \
   +"lua package.path = package.path .. ';${ROOT}/nvim/metermeter.nvim/lua/?.lua;${ROOT}/nvim/metermeter.nvim/lua/?/init.lua'" \
   +"luafile ${ROOT}/nvim/metermeter.nvim/lua/metermeter/init.lua" \
   +"luafile ${ROOT}/nvim/metermeter.nvim/plugin/metermeter.lua" \
-  +"luafile ${ROOT}/scripts/nvim_smoke_test.lua" \
   +qa!
 
 echo "[static] ok"

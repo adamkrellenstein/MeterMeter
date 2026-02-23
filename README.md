@@ -259,38 +259,27 @@ Run everything locally:
 ./scripts/run_static_checks.sh
 ```
 
-Run real LLM integration accuracy checks (opt-in):
+LLM integration tests auto-detect whether an endpoint is reachable and skip gracefully otherwise:
 
 ```bash
-export METERMETER_LLM_INTEGRATION=1
-export METERMETER_LLM_PROGRESS=1
-export METERMETER_LLM_ENDPOINT="http://127.0.0.1:11434/v1/chat/completions"
-export METERMETER_LLM_MODEL="qwen2.5:7b-instruct"
 ./scripts/run_llm_integration_tests.sh
 ```
 
-For extended corpora (more sonnets + non-iambic meters + iambic tetrameter), enable:
+Override endpoint/model via environment:
+
+```bash
+export METERMETER_LLM_ENDPOINT="http://127.0.0.1:11434/v1/chat/completions"
+export METERMETER_LLM_MODEL="qwen2.5:7b-instruct"
+export METERMETER_LLM_PROGRESS=1
+```
+
+For extended corpora (more sonnets + non-iambic meters + iambic tetrameter):
 
 ```bash
 export METERMETER_LLM_EXTENDED=1
 ```
 
-`tests/test_nvim_llm_integration.py` is intentionally skipped unless `METERMETER_LLM_INTEGRATION=1`.
-It validates real-model output and enforces integration floors on:
-- Sonnet 18 (iambic pentameter)
-- Sonnet 116 (iambic pentameter)
-- Sonnet 130 (iambic pentameter)
-- Milton, *On His Blindness* (iambic pentameter)
-- Whitman opening excerpt (free-verse anti-collapse guard)
-- Scansion quality floor on strict iambic lines (token-level stress pattern match)
-Extended suite adds:
-- Sonnet 29 + Sonnet 73 (iambic pentameter)
-- Trochaic tetrameter (Longfellow)
-- Anapestic tetrameter ("Night Before Christmas")
-- Dactylic hexameter (Longfellow, *Evangeline*)
-- Iambic tetrameter (Frost, *Stopping by Woods* opening stanza)
-
-For raw-model benchmarking (no normalization/repair), set:
+For raw-model benchmarking (no normalization/repair):
 
 ```bash
 export METERMETER_LLM_EVAL_MODE=strict

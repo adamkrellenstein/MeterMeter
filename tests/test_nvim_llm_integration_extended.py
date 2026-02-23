@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import unittest
+import urllib.request
 from typing import Dict, List
 from unittest.mock import patch
 
@@ -22,6 +23,17 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _llm_endpoint_reachable() -> bool:
+    endpoint = os.environ.get("METERMETER_LLM_ENDPOINT", "http://127.0.0.1:11434/v1/chat/completions")
+    base = endpoint.rsplit("/", 1)[0] if "/" in endpoint else endpoint
+    try:
+        req = urllib.request.Request(base, method="HEAD")
+        with urllib.request.urlopen(req, timeout=3):
+            return True
+    except Exception:
+        return False
 
 
 SONNET_29 = [
@@ -101,6 +113,8 @@ class NvimLLMIntegrationExtendedTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         if not _env_bool("METERMETER_LLM_EXTENDED", default=False):
             raise unittest.SkipTest("set METERMETER_LLM_EXTENDED=1 to run extended LLM integration suite")
+        if not _llm_endpoint_reachable():
+            raise unittest.SkipTest("LLM endpoint not available")
 
     def _run_cli(self, lines: List[Dict[str, object]], eval_mode: str = "production") -> Dict[str, object]:
         endpoint = os.environ.get("METERMETER_LLM_ENDPOINT", "http://127.0.0.1:11434/v1/chat/completions")
