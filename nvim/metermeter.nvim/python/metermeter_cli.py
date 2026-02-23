@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import gzip
 import json
 import os
 import re
@@ -23,34 +22,6 @@ DOMINANT_RATIO_MIN = 0.75
 DOMINANT_MIN_LINES = 6
 DOMINANT_LOW_CONF = 0.65
 DOMINANT_SCORE_DELTA = 0.08
-
-
-def _load_word_patterns_from_path(path: str) -> Dict[str, List[str]]:
-    path = str(path or "").strip()
-    if not path or not os.path.exists(path):
-        return {}
-    try:
-        if path.endswith(".gz"):
-            with gzip.open(path, "rt", encoding="utf-8") as fh:
-                raw = json.load(fh)
-        else:
-            with open(path, "r", encoding="utf-8") as fh:
-                raw = json.load(fh)
-    except Exception:
-        return {}
-    out: Dict[str, List[str]] = {}
-    if not isinstance(raw, dict):
-        return out
-    for word, patterns in raw.items():
-        if not isinstance(word, str) or not isinstance(patterns, list):
-            continue
-        clean = []
-        for p in patterns:
-            if isinstance(p, str) and p and set(p).issubset({"U", "S"}):
-                clean.append(p)
-        if clean:
-            out[word.lower()] = clean
-    return out
 
 
 def _resolve_path(path: str, env_var: str, fallback_filenames: List[str]) -> str:
@@ -118,7 +89,30 @@ def _char_to_byte_index(text: str, char_idx: int) -> int:
     return len(text[:char_idx].encode("utf-8"))
 
 
+def _stress_spans_from_syllables(text: str, syllable_positions: List[Tuple[str, bool]]) -> List[List[int]]:
+    """Compute byte-level stress spans by matching prosodic syllable texts against the line."""
+    spans: List[List[int]] = []
+    cursor = 0
+    text_lower = text.lower()
+    for syl_txt, is_strong in syllable_positions:
+        syl_lower = syl_txt.lower()
+        if not syl_lower:
+            continue
+        idx = text_lower.find(syl_lower, cursor)
+        if idx == -1:
+            continue
+        end = idx + len(syl_lower)
+        cursor = end
+        if is_strong:
+            b_s = _char_to_byte_index(text, idx)
+            b_e = _char_to_byte_index(text, end)
+            if b_e > b_s:
+                spans.append([b_s, b_e])
+    return spans
+
+
 def _stress_spans_for_line(text: str, token_patterns: List[str]) -> List[List[int]]:
+    """Compute byte-level stress spans from per-word token patterns (fallback for LLM path)."""
     spans: List[List[int]] = []
     matches = list(WORD_TOKEN_RE.finditer(text))
     limit = min(len(matches), len(token_patterns))
@@ -129,19 +123,14 @@ def _stress_spans_for_line(text: str, token_patterns: List[str]) -> List[List[in
         m = matches[i]
         token = m.group(0)
 
-        # Prefer highlighting the vowel nuclei for each syllable (more visible than trying to
-        # guess full syllable boundaries). If vowel-group count mismatches, fall back.
         groups = list(VOWEL_GROUP_RE.finditer(token))
         pat_len = len(pat)
-        # Common mismatch: silent trailing "e" creates an extra vowel group (e.g. "glance", "bare").
         if pat_len >= 1 and len(groups) == pat_len + 1 and token.lower().endswith("e"):
             last = groups[-1].group(0).lower()
             if last == "e":
                 groups = groups[:-1]
 
         if pat_len == 1 and groups:
-            # For 1-syllable tokens, highlight from the vowel nucleus to the end of the token.
-            # This is usually what readers perceive as the stressed "chunk" (e.g. mIGHT, glANCE).
             syl_spans = [(groups[0].start(), len(token))]
         elif len(groups) == pat_len and groups:
             syl_spans = [(g.start(), g.end()) for g in groups]
@@ -282,20 +271,10 @@ def main() -> int:
     config = req.get("config") or {}
     llm_cfg = (config.get("llm") or {}) if isinstance(config, dict) else {}
     context_cfg = (config.get("context") or {}) if isinstance(config, dict) else {}
-    lexicon_path_cfg = str(config.get("lexicon_path") or "").strip() if isinstance(config, dict) else ""
-    extra_lexicon_path_cfg = str(config.get("extra_lexicon_path") or "").strip() if isinstance(config, dict) else ""
-    lexicon_path = _resolve_path(lexicon_path_cfg, "METERMETER_LEXICON_PATH", ["cmudict.json.gz", "cmudict.json"])
-    extra_lexicon_path = _resolve_path(extra_lexicon_path_cfg, "METERMETER_EXTRA_LEXICON_PATH", ["extra_lexicon.json.gz", "extra_lexicon.json"])
 
     error_msg: Optional[str] = None
 
-    engine = MeterEngine(dict_path=lexicon_path or None)
-    if extra_lexicon_path:
-        extra_patterns = _load_word_patterns_from_path(extra_lexicon_path)
-        if extra_patterns:
-            merged = dict(engine.word_patterns)
-            merged.update(extra_patterns)
-            engine = MeterEngine(dict_path=lexicon_path or None, word_patterns=merged)
+    engine = MeterEngine()
     analyses: List[LineAnalysis] = []
     for item in lines:
         if not isinstance(item, dict):
@@ -407,7 +386,8 @@ def main() -> int:
         if meter_overridden:
             meter_overrides += 1
 
-        spans = _stress_spans_for_line(a.source_text, token_patterns)
+        # Use prosodic syllable positions for highlighting (accurate boundaries).
+        spans = _stress_spans_from_syllables(a.source_text, a.syllable_positions)
         results.append(
             {
                 "lnum": int(a.line_no),

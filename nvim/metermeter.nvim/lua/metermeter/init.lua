@@ -41,9 +41,6 @@ local DEFAULTS = {
     max_entries = 5000,
   },
 
-  lexicon_path = "",
-  extra_lexicon_path = "",
-
   debug_dump_path = "/tmp/metermeter_nvim_dump.json",
 }
 
@@ -335,8 +332,6 @@ local function _cache_key_for_text(st, text)
     tostring(cfg.llm.endpoint or ""),
     tostring(cfg.llm.eval_mode or ""),
     tostring(cfg.llm.temperature or ""),
-    tostring(cfg.lexicon_path or ""),
-    tostring(cfg.extra_lexicon_path or ""),
     tostring(epoch),
     text,
   }, "\n")
@@ -567,8 +562,6 @@ local function build_request(bufnr, ordered_lines, context)
     config = {
       llm = vim.deepcopy(cfg.llm),
       context = context or {},
-      lexicon_path = cfg.lexicon_path or "",
-      extra_lexicon_path = cfg.extra_lexicon_path or "",
     },
     lines = lines,
   }

@@ -40,6 +40,8 @@ def _llm_endpoint_reachable() -> bool:
         return True
 
 
+# -- Shakespeare sonnets --
+
 SONNET_29 = [
     "When, in disgrace with fortune and men's eyes,",
     "I all alone beweep my outcast state,",
@@ -56,7 +58,6 @@ SONNET_29 = [
     "For thy sweet love remember'd such wealth brings",
     "That then I scorn to change my state with kings.",
 ]
-
 
 SONNET_73 = [
     "That time of year thou mayst in me behold",
@@ -75,32 +76,80 @@ SONNET_73 = [
     "To love that well which thou must leave ere long.",
 ]
 
+# -- Trochaic tetrameter --
 
-TROCHAIC_TETRAMETER = [
+# Longfellow, "The Song of Hiawatha" (opening)
+HIAWATHA = [
+    "Should you ask me, whence these stories?",
+    "Whence these legends and traditions,",
+    "With the odors of the forest,",
+    "With the dew and damp of meadows,",
+    "With the curling smoke of wigwams,",
+    "With the rushing of great rivers,",
+    "With their frequent repetitions,",
+    "And their wild reverberations,",
+]
+
+# Poe, "The Raven" (trochaic octameter, but each hemistich is trochaic tetrameter)
+RAVEN = [
+    "Once upon a midnight dreary, while I pondered, weak and weary,",
+    "Over many a quaint and curious volume of forgotten lore,",
+    "While I nodded, nearly napping, suddenly there came a tapping,",
+    "As of some one gently rapping, rapping at my chamber door.",
+]
+
+# Longfellow, "A Psalm of Life" (trochaic tetrameter)
+PSALM_OF_LIFE = [
     "Tell me not, in mournful numbers,",
     "Life is but an empty dream!",
     "For the soul is dead that slumbers,",
     "And things are not what they seem.",
 ]
 
+# -- Anapestic tetrameter --
 
-ANAPESTIC_TETRAMETER = [
-    "'Twas the night before Christmas, when all through the house,",
-    "Not a creature was stirring, not even a mouse;",
-    "The stockings were hung by the chimney with care,",
-    "In hopes that St. Nicholas soon would be there;",
+# Byron, "The Destruction of Sennacherib"
+SENNACHERIB = [
+    "The Assyrian came down like the wolf on the fold,",
+    "And his cohorts were gleaming in purple and gold;",
+    "And the sheen of their spears was like stars on the sea,",
+    "When the blue wave rolls nightly on deep Galilee.",
+    "Like the leaves of the forest when Summer is green,",
+    "That host with their banners at sunset were seen:",
+    "Like the leaves of the forest when Autumn hath blown,",
+    "That host on the morrow lay wither'd and strown.",
 ]
 
+# -- Dactylic hexameter --
 
-DACTYLIC_HEXAMETER = [
-    "This is the forest primeval, the murmuring pines and the hemlocks,",
+# Longfellow, "Evangeline" (opening)
+EVANGELINE = [
+    "This is the forest primeval. The murmuring pines and the hemlocks,",
     "Bearded with moss, and in garments green, indistinct in the twilight,",
     "Stand like Druids of eld, with voices sad and prophetic,",
     "Stand like harpers hoar, with beards that rest on their bosoms.",
+    "Loud from its rocky caverns, the deep-voiced neighboring ocean",
+    "Speaks, and in accents disconsolate answers the wail of the forest.",
+    "This is the forest primeval; but where are the hearts that beneath it",
+    "Leaped like the roe, when he hears in the woodland the voice of the huntsman?",
 ]
 
+# -- Iambic tetrameter --
 
-IAMBIC_TETRAMETER = [
+# Marvell, "To His Coy Mistress" (opening)
+COY_MISTRESS = [
+    "Had we but world enough and time,",
+    "This coyness, lady, were no crime.",
+    "We would sit down, and think which way",
+    "To walk, and pass our long love's day.",
+    "Thou by the Indian Ganges' side",
+    "Shouldst rubies find; I by the tide",
+    "Of Humber would complain. I would",
+    "Love you ten years before the flood,",
+]
+
+# Frost, "Stopping by Woods on a Snowy Evening"
+STOPPING_BY_WOODS = [
     "Whose woods these are I think I know.",
     "His house is in the village though;",
     "He will not see me stopping here",
@@ -109,6 +158,29 @@ IAMBIC_TETRAMETER = [
     "To stop without a farmhouse near",
     "Between the woods and frozen lake",
     "The darkest evening of the year.",
+]
+
+# -- Special cases --
+
+# Feminine endings (extra unstressed syllable)
+FEMININE_ENDINGS = [
+    "To be, or not to be, that is the question:",           # iambic pentameter + feminine
+    "Whether 'tis nobler in the mind to suffer",            # iambic pentameter + feminine
+    "The slings and arrows of outrageous fortune,",         # iambic pentameter + feminine
+    "Or to take arms against a sea of troubles,",           # iambic pentameter + feminine
+]
+
+# Headless lines (missing first unstressed syllable)
+HEADLESS_IAMBIC = [
+    "Hark! the herald angels sing,",                        # headless iambic tetrameter
+]
+
+# Very short lines (monometer/dimeter)
+SHORT_LINES = [
+    "To be",                                                 # iambic monometer
+    "The rose",                                              # iambic monometer
+    "I wept and wept",                                       # iambic dimeter
+    "The night is long",                                     # iambic dimeter
 ]
 
 
@@ -182,20 +254,35 @@ class NvimLLMIntegrationExtendedTests(unittest.TestCase):
             "llm {} accuracy regression: {:.1%}\n{}".format(label, accuracy, "\n".join(mismatches)),
         )
 
+    # -- Shakespeare sonnets --
     def test_sonnet29_floor(self) -> None:
         self._assert_meter_floor("sonnet29", SONNET_29, "iambic pentameter", floor=0.85)
 
     def test_sonnet73_floor(self) -> None:
         self._assert_meter_floor("sonnet73", SONNET_73, "iambic pentameter", floor=0.85)
 
-    def test_trochaic_tetrameter_floor(self) -> None:
-        self._assert_meter_floor("trochaic", TROCHAIC_TETRAMETER, "trochaic tetrameter", floor=0.60)
+    # -- Trochaic tetrameter --
+    def test_hiawatha_floor(self) -> None:
+        self._assert_meter_floor("hiawatha", HIAWATHA, "trochaic tetrameter", floor=0.60)
 
-    def test_anapestic_tetrameter_floor(self) -> None:
-        self._assert_meter_floor("anapestic", ANAPESTIC_TETRAMETER, "anapestic tetrameter", floor=0.60)
+    def test_psalm_of_life_floor(self) -> None:
+        self._assert_meter_floor("psalm-of-life", PSALM_OF_LIFE, "trochaic tetrameter", floor=0.60)
 
-    def test_dactylic_hexameter_floor(self) -> None:
-        self._assert_meter_floor("dactylic", DACTYLIC_HEXAMETER, "dactylic hexameter", floor=0.60)
+    # -- Anapestic tetrameter --
+    def test_sennacherib_floor(self) -> None:
+        self._assert_meter_floor("sennacherib", SENNACHERIB, "anapestic tetrameter", floor=0.60)
 
-    def test_iambic_tetrameter_floor(self) -> None:
-        self._assert_meter_floor("iambic-tetrameter", IAMBIC_TETRAMETER, "iambic tetrameter", floor=0.75)
+    # -- Dactylic hexameter --
+    def test_evangeline_floor(self) -> None:
+        self._assert_meter_floor("evangeline", EVANGELINE, "dactylic hexameter", floor=0.60)
+
+    # -- Iambic tetrameter --
+    def test_coy_mistress_floor(self) -> None:
+        self._assert_meter_floor("coy-mistress", COY_MISTRESS, "iambic tetrameter", floor=0.75)
+
+    def test_stopping_by_woods_floor(self) -> None:
+        self._assert_meter_floor("stopping-by-woods", STOPPING_BY_WOODS, "iambic tetrameter", floor=0.75)
+
+    # -- Feminine endings (still iambic pentameter) --
+    def test_feminine_endings_floor(self) -> None:
+        self._assert_meter_floor("feminine-endings", FEMININE_ENDINGS, "iambic pentameter", floor=0.60)

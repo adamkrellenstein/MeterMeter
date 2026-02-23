@@ -2,9 +2,8 @@ import io
 import json
 import os
 import sys
-import unittest
 import tempfile
-import gzip
+import unittest
 from unittest.mock import patch
 
 
@@ -33,62 +32,6 @@ class _Resp:
 
 
 class NvimCLILLMTests(unittest.TestCase):
-    def test_lexicon_loader_filters_patterns(self) -> None:
-        payload = {
-            "Word": ["US", "SU"],
-            "bad": ["X", ""],
-            "mix": ["U", 123],
-        }
-        with tempfile.NamedTemporaryFile("wb", delete=False, suffix=".json.gz") as fh:
-            with gzip.GzipFile(fileobj=fh, mode="wb") as gz:
-                gz.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
-            path = fh.name
-        try:
-            out = metermeter_cli._load_word_patterns_from_path(path)
-        finally:
-            try:
-                os.unlink(path)
-            except Exception:
-                pass
-        self.assertIn("word", out)
-        self.assertEqual(out["word"], ["US", "SU"])
-        self.assertNotIn("bad", out)
-
-    def test_env_lexicon_path_is_used(self) -> None:
-        payload = {"florp": ["SU"]}
-        with tempfile.NamedTemporaryFile("wb", delete=False, suffix=".json.gz") as fh:
-            with gzip.GzipFile(fileobj=fh, mode="wb") as gz:
-                gz.write(json.dumps(payload, ensure_ascii=True).encode("utf-8"))
-            path = fh.name
-        req = {
-            "config": {
-                "llm": {
-                    "enabled": True,
-                    "endpoint": "mock://llm",
-                    "model": "mock-model",
-                    "timeout_ms": 1000,
-                    "temperature": 0.1,
-                    "max_lines_per_scan": 1,
-                },
-                "lexicon_path": "",
-            },
-            "lines": [
-                {"lnum": 0, "text": "florp"},
-            ],
-        }
-        stdin = io.StringIO(json.dumps(req, ensure_ascii=True))
-        stdout = io.StringIO()
-        with patch("sys.stdin", stdin), patch("sys.stdout", stdout), patch.dict(os.environ, {"METERMETER_LEXICON_PATH": path}):
-            rc = metermeter_cli.main()
-        try:
-            os.unlink(path)
-        except Exception:
-            pass
-        self.assertEqual(rc, 0)
-        out = json.loads(stdout.getvalue() or "{}")
-        results = out.get("results") or []
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].get("token_patterns"), ["SU"])
     def test_cli_marks_refined_lines_as_llm(self) -> None:
         req = {
             "config": {

@@ -1,0 +1,9 @@
+# 4B4V corpus files -- not redistributed; see README instructions below.
+*
+!.gitignore
+!README
+
+# To obtain the For Better For Verse (4B4V) corpus:
+#   1. Clone https://github.com/waynegraham/for_better_for_verse
+#   2. Copy the poems/ directory here as benchmarks/data/poems/
+#   The parser expects TEI XML files with <l met="..." real="..."> attributes.

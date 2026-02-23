@@ -179,7 +179,10 @@ class NvimLLMRefinerTests(unittest.TestCase):
             ref = LLMRefiner(endpoint="http://mock", model="mock")
             with self.assertRaises(RuntimeError):
                 ref.refine_lines(baselines, timeout_ms=1000, temperature=0.1)
-        http_err.close()
+        try:
+            http_err.close()
+        except (KeyError, AttributeError):
+            pass
 
     def test_meter_name_normalization_from_iambs(self) -> None:
         baselines = [_baseline(9, "To strive to seek")]
