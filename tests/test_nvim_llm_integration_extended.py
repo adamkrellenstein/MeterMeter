@@ -27,13 +27,17 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 def _llm_endpoint_reachable() -> bool:
     endpoint = os.environ.get("METERMETER_LLM_ENDPOINT", "http://127.0.0.1:11434/v1/chat/completions")
-    base = endpoint.rsplit("/", 1)[0] if "/" in endpoint else endpoint
+    from urllib.parse import urlparse
+    parsed = urlparse(endpoint)
+    base = "{}://{}".format(parsed.scheme, parsed.netloc)
     try:
-        req = urllib.request.Request(base, method="HEAD")
-        with urllib.request.urlopen(req, timeout=3):
+        req = urllib.request.Request(base, method="GET")
+        with urllib.request.urlopen(req, timeout=5):
             return True
-    except Exception:
+    except urllib.error.URLError:
         return False
+    except Exception:
+        return True
 
 
 SONNET_29 = [

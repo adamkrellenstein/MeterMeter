@@ -23,13 +23,17 @@ from tests.test_nvim_broad_corpora import MILTON_ON_HIS_BLINDNESS, WHITMAN_SONG_
 
 def _llm_endpoint_reachable() -> bool:
     endpoint = os.environ.get("METERMETER_LLM_ENDPOINT", "http://127.0.0.1:11434/v1/chat/completions")
-    base = endpoint.rsplit("/", 1)[0] if "/" in endpoint else endpoint
+    from urllib.parse import urlparse
+    parsed = urlparse(endpoint)
+    base = "{}://{}".format(parsed.scheme, parsed.netloc)
     try:
-        req = urllib.request.Request(base, method="HEAD")
-        with urllib.request.urlopen(req, timeout=3):
+        req = urllib.request.Request(base, method="GET")
+        with urllib.request.urlopen(req, timeout=5):
             return True
-    except Exception:
+    except urllib.error.URLError:
         return False
+    except Exception:
+        return True
 
 KNOWN_REGRESSION_LINES = [
     "Nor shall Death brag thou wander'st in his shade,",
@@ -47,6 +51,13 @@ SCANSION_IAMBIC_GOLD = [
     ("But thy eternal summer shall not fade,", "USUSUSUSUS"),
     ("So long as men can breathe or eyes can see,", "USUSUSUSUS"),
 ]
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 class NvimLLMIntegrationTests(unittest.TestCase):
