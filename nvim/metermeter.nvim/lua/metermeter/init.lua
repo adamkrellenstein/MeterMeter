@@ -99,7 +99,7 @@ local function should_enable(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return false
   end
-  if vim.api.nvim_buf_get_option(bufnr, "buftype") ~= "" then
+  if vim.bo[bufnr].buftype ~= "" then
     return false
   end
 

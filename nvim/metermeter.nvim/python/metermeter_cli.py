@@ -190,6 +190,89 @@ def _read_stdin_json() -> dict:
     return json.loads(raw)
 
 
+def _try_pattern_rescore(
+    meter_name: str, conf: float, pattern_best_meter: str,
+    pattern_best_score: float, pattern_best_margin: float, **_: object,
+) -> Optional[Tuple[str, float, str]]:
+    """Override if deterministic pattern scoring strongly disagrees with LLM label."""
+    if (
+        pattern_best_meter
+        and pattern_best_meter != meter_name
+        and pattern_best_score >= RESCORE_MIN_SCORE
+        and pattern_best_margin >= RESCORE_MIN_MARGIN
+    ):
+        return pattern_best_meter, min(conf, pattern_best_score), "pattern_rescore"
+    return None
+
+
+def _try_iambic_guard(
+    meter_name: str, conf: float, pattern_best_meter: str,
+    pattern_best_score: float, pattern_best_margin: float,
+    stress_pattern: str, **_: object,
+) -> Optional[Tuple[str, float, str]]:
+    """Correct to iambic pentameter when stress pattern fits and LLM confidence is low."""
+    if (
+        pattern_best_meter == "iambic pentameter"
+        and meter_name != pattern_best_meter
+        and 9 <= len(stress_pattern) <= 11
+        and pattern_best_score >= IAMBIC_GUARD_MIN_SCORE
+        and pattern_best_margin >= IAMBIC_GUARD_MIN_MARGIN
+        and conf <= IAMBIC_GUARD_MAX_CONF
+    ):
+        return pattern_best_meter, min(conf, pattern_best_score), "iambic_guard"
+    return None
+
+
+def _try_baseline_guard(
+    meter_name: str, conf: float, baseline_meter: str,
+    baseline_conf: float, stress_pattern: str, **_: object,
+) -> Optional[Tuple[str, float, str]]:
+    """Restore baseline iambic pentameter when LLM drifted but engine was confident."""
+    if (
+        baseline_meter == "iambic pentameter"
+        and meter_name != baseline_meter
+        and 9 <= len(stress_pattern) <= 11
+        and baseline_conf >= BASELINE_GUARD_CONF_MIN
+        and conf <= BASELINE_GUARD_LLM_MAX_CONF
+    ):
+        return baseline_meter, min(conf, baseline_conf), "baseline_guard"
+    return None
+
+
+def _try_dominant_smoothing(
+    meter_name: str, conf: float, stress_pattern: str,
+    dominant_meter: str, dominant_ratio: float, dominant_line_count: int,
+    engine: MeterEngine, **_: object,
+) -> Optional[Tuple[str, float, str]]:
+    """Smooth toward dominant poem meter when evidence supports it."""
+    if not (
+        dominant_meter
+        and dominant_ratio >= DOMINANT_RATIO_MIN
+        and dominant_line_count >= DOMINANT_MIN_LINES
+        and meter_name != dominant_meter
+    ):
+        return None
+    dom_score = engine.score_stress_pattern_for_meter(stress_pattern, dominant_meter)
+    cur_score = engine.score_stress_pattern_for_meter(stress_pattern, meter_name)
+    if (
+        dom_score is not None
+        and cur_score is not None
+        and conf <= DOMINANT_LOW_CONF
+        and float(dom_score) >= (float(cur_score) + DOMINANT_SCORE_DELTA)
+    ):
+        return dominant_meter, min(conf, float(dom_score)), "dominant_smoothing"
+    return None
+
+
+# Override functions applied in priority order; first match wins.
+_METER_OVERRIDES = [
+    _try_pattern_rescore,
+    _try_iambic_guard,
+    _try_baseline_guard,
+    _try_dominant_smoothing,
+]
+
+
 def _weighted_dominant_meter(refined: Dict[int, object]) -> Tuple[str, float, int]:
     counts: Dict[str, float] = {}
     total = 0.0
@@ -326,68 +409,27 @@ def main() -> int:
         stress_pattern = "".join(p for p in token_patterns if isinstance(p, str))
         pattern_best_meter, pattern_best_score, pattern_debug = engine.best_meter_for_stress_pattern(stress_pattern)
         pattern_best_margin = float(pattern_debug.get("margin") or 0.0)
+        baseline_meter = (a.meter_name or "").strip().lower()
+        baseline_conf = float(getattr(a, "confidence", 0.0) or 0.0)
         meter_overridden = False
         override_reason = ""
 
-        if (
-            pattern_best_meter
-            and pattern_best_meter != meter_name
-            and pattern_best_score >= RESCORE_MIN_SCORE
-            and pattern_best_margin >= RESCORE_MIN_MARGIN
-        ):
-            meter_name = pattern_best_meter
-            conf = min(float(conf), float(pattern_best_score))
-            meter_overridden = True
-            override_reason = "pattern_rescore"
-
-        if (
-            not meter_overridden
-            and pattern_best_meter == "iambic pentameter"
-            and meter_name != pattern_best_meter
-            and 9 <= len(stress_pattern) <= 11
-            and pattern_best_score >= IAMBIC_GUARD_MIN_SCORE
-            and pattern_best_margin >= IAMBIC_GUARD_MIN_MARGIN
-            and float(conf) <= IAMBIC_GUARD_MAX_CONF
-        ):
-            meter_name = pattern_best_meter
-            conf = min(float(conf), float(pattern_best_score))
-            meter_overridden = True
-            override_reason = "iambic_guard"
-
-        baseline_meter = (a.meter_name or "").strip().lower()
-        baseline_conf = float(getattr(a, "confidence", 0.0) or 0.0)
-        if (
-            not meter_overridden
-            and baseline_meter == "iambic pentameter"
-            and meter_name != baseline_meter
-            and 9 <= len(stress_pattern) <= 11
-            and baseline_conf >= BASELINE_GUARD_CONF_MIN
-            and float(conf) <= BASELINE_GUARD_LLM_MAX_CONF
-        ):
-            meter_name = baseline_meter
-            conf = min(float(conf), baseline_conf)
-            meter_overridden = True
-            override_reason = "baseline_guard"
-
-        can_apply_dominant = (
-            dominant_meter
-            and dominant_ratio >= DOMINANT_RATIO_MIN
-            and dominant_line_count >= DOMINANT_MIN_LINES
-            and meter_name != dominant_meter
+        override_ctx = dict(
+            meter_name=meter_name, conf=float(conf),
+            pattern_best_meter=pattern_best_meter,
+            pattern_best_score=pattern_best_score,
+            pattern_best_margin=pattern_best_margin,
+            stress_pattern=stress_pattern,
+            baseline_meter=baseline_meter, baseline_conf=baseline_conf,
+            dominant_meter=dominant_meter, dominant_ratio=dominant_ratio,
+            dominant_line_count=dominant_line_count, engine=engine,
         )
-        if can_apply_dominant:
-            dom_score = engine.score_stress_pattern_for_meter(stress_pattern, dominant_meter)
-            cur_score = engine.score_stress_pattern_for_meter(stress_pattern, meter_name)
-            if (
-                dom_score is not None
-                and cur_score is not None
-                and float(conf) <= DOMINANT_LOW_CONF
-                and float(dom_score) >= (float(cur_score) + DOMINANT_SCORE_DELTA)
-            ):
-                meter_name = dominant_meter
-                conf = min(float(conf), float(dom_score))
+        for override_fn in _METER_OVERRIDES:
+            result = override_fn(**override_ctx)
+            if result is not None:
+                meter_name, conf, override_reason = result
                 meter_overridden = True
-                override_reason = "dominant_smoothing"
+                break
 
         if meter_overridden:
             meter_overrides += 1

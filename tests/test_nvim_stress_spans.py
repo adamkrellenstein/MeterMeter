@@ -82,3 +82,53 @@ class NvimStressSpanTests(unittest.TestCase):
         for s, e in spans:
             if s >= b_start and s <= b_end:
                 self.assertLessEqual(e, b_end)
+
+    def test_char_to_byte_index_ascii(self) -> None:
+        text = "hello world"
+        self.assertEqual(metermeter_cli._char_to_byte_index(text, 0), 0)
+        self.assertEqual(metermeter_cli._char_to_byte_index(text, 5), 5)
+        self.assertEqual(metermeter_cli._char_to_byte_index(text, len(text)), len(text))
+
+    def test_char_to_byte_index_multibyte(self) -> None:
+        # em-dash is 3 bytes in UTF-8
+        text = "to be\u2014or not"
+        dash_char = text.index("\u2014")
+        byte_at_dash = metermeter_cli._char_to_byte_index(text, dash_char)
+        self.assertEqual(byte_at_dash, len("to be".encode("utf-8")))
+        byte_after_dash = metermeter_cli._char_to_byte_index(text, dash_char + 1)
+        self.assertEqual(byte_after_dash, byte_at_dash + 3)
+
+    def test_char_to_byte_index_accented(self) -> None:
+        # e-acute is 2 bytes in UTF-8
+        text = "r\u00e9sum\u00e9 and fate"
+        # "r" is 1 byte, "e-acute" is 2 bytes, "sum" is 3 bytes, "e-acute" is 2 bytes
+        self.assertEqual(metermeter_cli._char_to_byte_index(text, 0), 0)
+        self.assertEqual(metermeter_cli._char_to_byte_index(text, 1), 1)   # after "r"
+        self.assertEqual(metermeter_cli._char_to_byte_index(text, 2), 3)   # after "r\u00e9"
+
+    def test_stress_spans_with_emdash_prefix(self) -> None:
+        # Verify byte offsets are correct when multi-byte chars precede tokens.
+        text = "\u2014 might and grace"
+        spans = metermeter_cli._stress_spans_for_line(text, ["S", "U", "S"])
+        self.assertTrue(spans, "expected stress spans")
+        # All span byte offsets must fall within the encoded line.
+        encoded_len = len(text.encode("utf-8"))
+        for s, e in spans:
+            self.assertGreaterEqual(s, 0)
+            self.assertLessEqual(e, encoded_len)
+            self.assertGreater(e, s)
+        # "might" starts at char 2 (after em-dash + space), byte 4 (3-byte dash + space).
+        # Its vowel nucleus "i" is at char 3 / byte 5; span should start there.
+        first_span_start = spans[0][0]
+        self.assertEqual(first_span_start, len("\u2014 m".encode("utf-8")))
+
+    def test_stress_spans_with_accented_token(self) -> None:
+        # Line with accented character inside a token.
+        text = "the na\u00efve heart"
+        spans = metermeter_cli._stress_spans_for_line(text, ["U", "SU", "S"])
+        self.assertTrue(spans, "expected stress spans")
+        encoded_len = len(text.encode("utf-8"))
+        for s, e in spans:
+            self.assertGreaterEqual(s, 0)
+            self.assertLessEqual(e, encoded_len)
+            self.assertGreater(e, s)

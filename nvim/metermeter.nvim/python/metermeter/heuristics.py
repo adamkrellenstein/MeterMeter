@@ -49,6 +49,19 @@ UNSTRESSED_FUNCTION_WORDS = {
     "your",
 }
 
+# Broader set including archaic forms and auxiliaries that may carry stress
+# contextually but should have flexible stress assignment in meter fitting.
+FUNCTION_WORDS = UNSTRESSED_FUNCTION_WORDS | {
+    "can",
+    "do",
+    "hath",
+    "not",
+    "shall",
+    "thee",
+    "thou",
+    "thy",
+}
+
 STRESSED_SUFFIXES = (
     "tion",
     "sion",

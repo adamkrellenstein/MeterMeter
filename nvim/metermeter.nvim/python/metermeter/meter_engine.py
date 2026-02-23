@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from .heuristics import clean_word, estimate_stress_pattern, estimate_syllables
+from .heuristics import FUNCTION_WORDS, clean_word, estimate_stress_pattern, estimate_syllables
 
 TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 
@@ -28,6 +28,43 @@ LINE_NAME_BY_FEET = {
     5: "pentameter",
     6: "hexameter",
 }
+
+# -- Pattern distance scoring --
+# Reduced mismatch cost at first position of binary feet (allows trochaic opening etc.).
+BINARY_FIRST_POS_DISCOUNT = 0.5
+# Per-syllable penalty for length difference between pattern and template.
+LENGTH_MISMATCH_COST = 0.85
+
+# -- Foot position penalties for iambic meter --
+IAMBIC_FIRST_FOOT_PENALTY = 0.16       # Trochaic opening is common; cheap.
+IAMBIC_SPONDEE_PENALTY = 0.34          # Stress where weak expected (spondee/trochee sub).
+IAMBIC_WEAK_STRONG_PENALTY = 0.58      # Weak where strong expected; costly.
+
+# -- Foot position penalties for trochaic meter (mirror of iambic, weaker bias) --
+TROCHAIC_FIRST_FOOT_PENALTY = 0.18
+TROCHAIC_SPONDEE_PENALTY = 0.38
+TROCHAIC_WEAK_STRONG_PENALTY = 0.54
+
+# -- Pentameter prior for 9-11 syllable lines (sonnet assumption) --
+IAMBIC_PENTAMETER_BONUS = 0.18
+TROCHAIC_PENTAMETER_BONUS = 0.03
+TERNARY_METER_PENALTY = 0.14
+# Iambic pentameter wins if within this margin of the best candidate.
+IAMBIC_BIAS_THRESHOLD = 0.10
+
+# -- Token pattern options --
+STRESS_INDEX_PENALTY_PER_POS = 0.15    # OOV: penalty per position from estimated stress.
+FN_WORD_EARLY_STRESS_PENALTY = 0.1     # Polysyllabic function words: penalize early stress.
+
+# -- Best-fit blending --
+OPTION_PENALTY_BLEND = 0.5             # How much lexical choice penalty affects distance.
+GLOBAL_FIT_WEIGHT = 0.75               # Weight of global meter fit in final score.
+LEXICAL_FIT_WEIGHT = 0.25              # Weight of adjusted pattern score in final score.
+
+# -- Confidence formula --
+CONF_SCORE_WEIGHT = 0.72               # Best meter score.
+CONF_MARGIN_WEIGHT = 0.20              # Margin over second-best.
+CONF_OOV_WEIGHT = 0.08                 # Penalty for out-of-vocabulary tokens.
 
 def _load_builtin_lexicon() -> Dict[str, List[str]]:
     path = os.path.join(os.path.dirname(__file__), "builtin_lexicon.json")
@@ -138,59 +175,7 @@ class MeterEngine:
         return [], False
 
     def _is_function_word(self, word: str) -> bool:
-        return clean_word(word) in {
-            "a",
-            "an",
-            "and",
-            "as",
-            "at",
-            "be",
-            "but",
-            "by",
-            "for",
-            "from",
-            "if",
-            "in",
-            "into",
-            "is",
-            "it",
-            "nor",
-            "of",
-            "on",
-            "or",
-            "so",
-            "than",
-            "that",
-            "the",
-            "their",
-            "them",
-            "then",
-            "there",
-            "these",
-            "they",
-            "this",
-            "to",
-            "up",
-            "was",
-            "we",
-            "were",
-            "what",
-            "when",
-            "where",
-            "which",
-            "who",
-            "with",
-            "you",
-            "your",
-            "thou",
-            "thy",
-            "thee",
-            "shall",
-            "do",
-            "hath",
-            "can",
-            "not",
-        }
+        return clean_word(word) in FUNCTION_WORDS
 
     def _single_stress_pattern(self, syllables: int, stress_idx: int) -> str:
         if syllables <= 0:
@@ -232,10 +217,10 @@ class MeterEngine:
             if pat in seen:
                 continue
             seen.add(pat)
-            penalty = 0.15 * abs(idx - base_idx)
+            penalty = STRESS_INDEX_PENALTY_PER_POS * abs(idx - base_idx)
             # Bias polysyllabic function words to weak openings / tail stress.
             if is_fn and idx < (syllables - 1):
-                penalty += 0.1
+                penalty += FN_WORD_EARLY_STRESS_PENALTY
             options.append((pat, penalty))
 
         if not options:
@@ -253,11 +238,11 @@ class MeterEngine:
             if a[idx] == b[idx]:
                 continue
             if idx == 0 and foot_name in {"iambic", "trochaic"}:
-                mismatch += 0.5
+                mismatch += BINARY_FIRST_POS_DISCOUNT
             else:
                 mismatch += 1.0
 
-        mismatch += abs(len(a) - len(b)) * 0.85
+        mismatch += abs(len(a) - len(b)) * LENGTH_MISMATCH_COST
         return mismatch
 
     def _meter_candidates(self, pattern: str) -> List[Tuple[str, int, float]]:
@@ -298,11 +283,11 @@ class MeterEngine:
         if 9 <= len(pattern) <= 11:
             if foot_name in {"iambic", "trochaic"} and feet == 5:
                 if foot_name == "iambic":
-                    score += 0.18
+                    score += IAMBIC_PENTAMETER_BONUS
                 else:
-                    score += 0.03
+                    score += TROCHAIC_PENTAMETER_BONUS
             if foot_name in {"anapestic", "dactylic"}:
-                score -= 0.14
+                score -= TERNARY_METER_PENALTY
         return max(0.0, min(1.0, score))
 
     def _parse_meter_name(self, meter_name: str) -> Optional[Tuple[str, int]]:
@@ -350,7 +335,7 @@ class MeterEngine:
             if (
                 iambic_score is not None
                 and (best_name != "iambic" or best_feet != 5)
-                and iambic_score >= (best_score - 0.10)
+                and iambic_score >= (best_score - IAMBIC_BIAS_THRESHOLD)
             ):
                 best_name, best_feet, best_score = "iambic", 5, iambic_score
                 iambic_bias = True
@@ -395,23 +380,23 @@ class MeterEngine:
             # - occasional spondee in strong middle feet: moderate penalty
             if foot_name == "iambic":
                 if foot_idx == 0:
-                    out += 0.16
+                    out += IAMBIC_FIRST_FOOT_PENALTY
                     continue
                 if in_foot_pos == 0:
                     # stress where weak expected (possible spondee/trochee substitution)
-                    out += 0.34
+                    out += IAMBIC_SPONDEE_PENALTY
                 else:
                     # weak where strong expected
-                    out += 0.58
+                    out += IAMBIC_WEAK_STRONG_PENALTY
                 continue
 
             # Trochaic prior (mirror behavior, slightly weaker because our corpus target is mostly iambic).
             if foot_idx == 0:
-                out += 0.18
+                out += TROCHAIC_FIRST_FOOT_PENALTY
             elif in_foot_pos == 0:
-                out += 0.38
+                out += TROCHAIC_SPONDEE_PENALTY
             else:
-                out += 0.54
+                out += TROCHAIC_WEAK_STRONG_PENALTY
 
         return out
 
@@ -451,12 +436,12 @@ class MeterEngine:
         stress_pattern = "".join(built)
         dist = self._pattern_distance(stress_pattern, template, foot_name)
         # Include lexical choice penalty before final meter scoring.
-        dist += option_penalty * 0.5
+        dist += option_penalty * OPTION_PENALTY_BLEND
         normalizer = max(len(stress_pattern), templ_len, 1)
         adjusted_pattern_score = max(0.0, 1.0 - (dist / normalizer))
         score = self._score_pattern_for_meter(stress_pattern, foot_name, feet)
         # Blend lexical fit and global meter fit.
-        score = max(0.0, min(1.0, (score * 0.75) + (adjusted_pattern_score * 0.25)))
+        score = max(0.0, min(1.0, (score * GLOBAL_FIT_WEIGHT) + (adjusted_pattern_score * LEXICAL_FIT_WEIGHT)))
         return stress_pattern, score, chosen_patterns, oov_tokens
 
     def analyze_line(self, line: str, line_no: int = 0) -> Optional[LineAnalysis]:
@@ -494,7 +479,7 @@ class MeterEngine:
         if 9 <= syllable_len <= 11:
             for name, feet, score, sp, tok_pats, oov in refined:
                 if name == "iambic" and feet == 5:
-                    if score >= (best_score - 0.10) and (name != best_name or feet != best_feet):
+                    if score >= (best_score - IAMBIC_BIAS_THRESHOLD) and (name != best_name or feet != best_feet):
                         best_name, best_feet, best_score = name, feet, score
                         stress_pattern = sp
                         best_token_patterns = tok_pats
@@ -510,7 +495,7 @@ class MeterEngine:
         margin = max(0.0, best_score - second_score)
         oov_ratio = len(oov_tokens) / float(len(tokens)) if tokens else 0.0
 
-        confidence = (best_score * 0.72) + (margin * 0.2) + ((1.0 - oov_ratio) * 0.08)
+        confidence = (best_score * CONF_SCORE_WEIGHT) + (margin * CONF_MARGIN_WEIGHT) + ((1.0 - oov_ratio) * CONF_OOV_WEIGHT)
         confidence = max(0.0, min(1.0, confidence))
 
         line_name = LINE_NAME_BY_FEET.get(best_feet, f"{best_feet}-foot")
