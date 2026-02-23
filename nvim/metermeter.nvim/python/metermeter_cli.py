@@ -54,7 +54,7 @@ def _load_word_patterns_from_path(path: str) -> Dict[str, List[str]]:
 
 
 def _resolve_lexicon_path(path: str) -> str:
-    path = str(path or "").strip()
+    path = os.path.expanduser(str(path or "").strip())
     if path and os.path.exists(path):
         return path
     env_path = os.environ.get("METERMETER_LEXICON_PATH", "").strip()
@@ -71,7 +71,7 @@ def _resolve_lexicon_path(path: str) -> str:
 
 
 def _resolve_extra_lexicon_path(path: str) -> str:
-    path = str(path or "").strip()
+    path = os.path.expanduser(str(path or "").strip())
     if path and os.path.exists(path):
         return path
     env_path = os.environ.get("METERMETER_EXTRA_LEXICON_PATH", "").strip()

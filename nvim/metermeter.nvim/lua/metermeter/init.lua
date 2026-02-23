@@ -44,7 +44,7 @@ local DEFAULTS = {
     max_entries = 5000,
   },
 
-  lexicon_path = "~/.metermeter/cmudict.json.gz",
+  lexicon_path = "",
   extra_lexicon_path = "",
 
   debug_dump_path = "/tmp/metermeter_nvim_dump.json",
@@ -1007,6 +1007,31 @@ function M.status(bufnr)
     tostring(st.llm_error or "")
   )
   vim.notify(msg, vim.log.levels.INFO)
+end
+
+function M.statusline(bufnr)
+  bufnr = (bufnr == 0 or bufnr == nil) and vim.api.nvim_get_current_buf() or bufnr
+  local st = state_by_buf[bufnr]
+  if not st or not st.enabled then
+    return ""
+  end
+  local err = tostring(st.llm_error or "")
+  if err ~= "" then
+    -- Compact the error for statusline display.
+    err = err:gsub("%s+", " ")
+    if #err > 60 then
+      err = err:sub(1, 57) .. "..."
+    end
+    return "MM: " .. err
+  end
+  local meter = tostring(st.dominant_meter or "")
+  if meter ~= "" then
+    return "MM: " .. meter
+  end
+  if st.scan_running then
+    return "MM: scanning"
+  end
+  return "MM"
 end
 
 function M._debug_stats(bufnr)

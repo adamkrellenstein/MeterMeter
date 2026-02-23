@@ -106,6 +106,31 @@ set termguicolors
 - `:MeterMeterDump` (writes `/tmp/metermeter_nvim_dump.json`)
 - `:MeterMeterStatus` (shows effective enable state, auto/filetype match, override, LLM cooldown)
 
+### Statusline
+
+`require("metermeter").statusline()` returns a short string for statusline integration:
+
+- `""` when MeterMeter is inactive on the current buffer
+- `"MM: iambic pentameter"` (or whatever the dominant meter is)
+- `"MM: scanning"` while a scan is in progress
+- `"MM: <error>"` when the LLM is failing (truncated to 60 chars)
+
+Example for a custom statusline:
+
+```vim
+set statusline+=%{luaeval("require('metermeter').statusline()")}
+```
+
+Or with lualine:
+
+```lua
+require("lualine").setup({
+  sections = {
+    lualine_x = { function() return require("metermeter").statusline() end },
+  },
+})
+```
+
 ## File Enable Rules
 
 MeterMeter enables itself when `&filetype` includes `metermeter`.
@@ -193,7 +218,7 @@ require("metermeter").setup({ ... })
 | `llm.max_lines_per_scan` | `2` | Max lines sent to LLM per scan chunk (each scan phase chunks lines by this value). | Controls latency/cost and keeps editor responsiveness stable. |
 | `llm.failure_threshold` | `3` | Consecutive LLM errors before cooldown kicks in. | Prevents repeated failing requests from thrashing the editor. |
 | `llm.cooldown_ms` | `15000` | Cooldown duration after hitting failure threshold. | Gives local runtime/endpoints time to recover before retry. |
-| `lexicon_path` | `~/.metermeter/cmudict.json.gz` | Path to a large word-pattern JSON (or `.json.gz`) lexicon; auto-resolved from `~/.metermeter/` or `METERMETER_LEXICON_PATH`. | Allows full CMUdict-sized vocab without bundling it. |
+| `lexicon_path` | `""` | Optional path to a large word-pattern JSON (or `.json.gz`) lexicon. When empty, auto-resolved from `~/.metermeter/cmudict.json.gz` or `METERMETER_LEXICON_PATH`. | Allows full CMUdict-sized vocab without bundling it. |
 | `extra_lexicon_path` | `""` | Optional extra lexicon path to merge on top of base patterns. | Lets you add custom vocabulary without replacing the main lexicon. |
 
 Global toggle:
