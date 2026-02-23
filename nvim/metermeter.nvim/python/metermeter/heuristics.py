@@ -99,6 +99,13 @@ ELIDED_SYLLABLE_OVERRIDES = {
     "spirit": 2,
 }
 
+# Adjectives where "-ed" is traditionally syllabic even after non-t/d consonants.
+SYLLABIC_ED_ADJECTIVES = {
+    "aged", "beloved", "blessed", "crabbed", "crooked", "cursed",
+    "dogged", "jagged", "learned", "naked", "ragged", "rugged",
+    "sacred", "wicked", "winged", "wretched",
+}
+
 
 def clean_word(word: str) -> str:
     return NON_ALPHA_RE.sub("", word.lower()).strip("'")
@@ -117,6 +124,26 @@ def estimate_syllables(word: str) -> int:
     syllables = len(groups)
 
     if clean.endswith("e") and not clean.endswith(("le", "ye")) and syllables > 1:
+        syllables -= 1
+    # Silent past-tense "-ed": the "e" in "-ed" is silent after consonants
+    # other than t/d (e.g., "entwined" = 2 syl, not 3). Exceptions:
+    # - Adjectives with syllabic "-ed" (e.g., "naked", "wicked").
+    # - Consonant + "led" (single L): the "e" is part of syllabic "-le"
+    #   from the base word (e.g., "trampled" from "trample").
+    elif (
+        clean.endswith("ed")
+        and len(clean) >= 4
+        and syllables > 1
+        and clean[-3] not in "aeiouy"
+        and clean[-3] not in "td"
+        and clean not in SYLLABIC_ED_ADJECTIVES
+        and not (
+            clean.endswith("led")
+            and not clean.endswith("lled")
+            and len(clean) >= 5
+            and clean[-4] not in "aeiouy"
+        )
+    ):
         syllables -= 1
 
     return max(1, syllables)
