@@ -307,6 +307,8 @@ def main() -> int:
     lexicon_path = _resolve_lexicon_path(lexicon_path_cfg)
     extra_lexicon_path = _resolve_extra_lexicon_path(extra_lexicon_path_cfg)
 
+    error_msg: Optional[str] = None
+
     if lexicon_required and (not lexicon_path or not os.path.exists(lexicon_path)):
         error_msg = "lexicon_missing: {}".format(lexicon_path_cfg)
         lexicon_path = ""
@@ -332,7 +334,6 @@ def main() -> int:
         analyses.append(a)
 
     refined: Dict[int, object] = {}
-    error_msg: Optional[str] = None
     llm_enabled = bool(llm_cfg.get("enabled", False))
     endpoint = str(llm_cfg.get("endpoint", "") or "").strip()
     model = str(llm_cfg.get("model", "") or "").strip()

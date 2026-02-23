@@ -8,19 +8,24 @@ Scanning is progressive and incremental: visible lines are annotated first, near
 
 ## Architecture
 
-MeterMeter has two layers:
+MeterMeter has three layers:
 
-- Neovim runtime layer (`nvim/metermeter.nvim/lua/metermeter/init.lua`)
+- Neovim runtime layer (`nvim/metermeter.nvim/lua/metermeter/`)
   - Determines which lines are scanable (ignores native comment lines).
   - Schedules scans with debounce + periodic tick.
   - Runs progressive scan phases (`visible -> prefetch -> rest-of-buffer`).
-  - Reuses cached line analyses keyed by `(model, endpoint, line_text)`.
+  - Maintains a per-buffer LRU cache keyed by `(model, endpoint, eval_mode, temperature, lexicon_path, extra_lexicon_path, cache_epoch, line_text)`.
   - Renders stress extmarks and aligned end-of-line meter hints.
 
-- Python analysis layer (`nvim/metermeter.nvim/python/metermeter_cli.py`, `nvim/metermeter.nvim/python/metermeter/meter_engine.py`)
-  - Builds token/syllable scaffolding and stress spans.
-  - Validates strict LLM JSON output (`meter_name`, `confidence`, `token_stress_patterns`).
-  - Emits annotations only for valid LLM results.
+- Python CLI layer (`nvim/metermeter.nvim/python/metermeter_cli.py`)
+  - Bridges Neovim and the analysis engine via stdin/stdout JSON protocol.
+  - Applies post-LLM meter overrides (pattern rescore, iambic guard, baseline guard, dominant-meter smoothing) in priority order; first match wins.
+  - Computes stress-highlight byte spans from token patterns.
+
+- Python analysis layer (`nvim/metermeter.nvim/python/metermeter/`)
+  - `meter_engine.py`: Builds token/syllable scaffolding, scores stress patterns against meter templates, produces baseline analyses.
+  - `llm_refiner.py`: Validates strict LLM JSON output (`meter_name`, `confidence`, `token_stress_patterns`) with normalization/repair in production mode.
+  - `heuristics.py`: Syllable counting and stress estimation for out-of-vocabulary words.
 
 Pipeline behavior is LLM-first and LLM-required:
 
@@ -185,11 +190,10 @@ require("metermeter").setup({ ... })
 | `ui.analysis_hint_mode` | `"off"` | Hint display mode: `off` or `inline`. | Lets users choose whether notes should affect layout/visual density. |
 | `cache.max_entries` | `5000` | Max number of cached analysis entries per buffer (LRU-style eviction). | Prevents unbounded memory growth in long sessions. |
 | `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path used by `:MeterMeterDump`. | Fast, file-based debugging without requiring interactive logging hooks. |
-| `llm.max_lines_per_scan` | `2` | Max lines sent to LLM per scan cycle. | Controls latency/cost and keeps editor responsiveness stable. |
-| `llm.hide_non_refined` | `false` | Retained for compatibility; has no practical effect in strict LLM-only mode. | Keeps settings stable across upgrades. |
+| `llm.max_lines_per_scan` | `2` | Max lines sent to LLM per scan chunk (each scan phase chunks lines by this value). | Controls latency/cost and keeps editor responsiveness stable. |
 | `llm.failure_threshold` | `3` | Consecutive LLM errors before cooldown kicks in. | Prevents repeated failing requests from thrashing the editor. |
 | `llm.cooldown_ms` | `15000` | Cooldown duration after hitting failure threshold. | Gives local runtime/endpoints time to recover before retry. |
-| `lexicon_path` | `""` | Optional path to a large word-pattern JSON (or `.json.gz`) lexicon. | Allows full CMUdict-sized vocab without bundling it. |
+| `lexicon_path` | `~/.metermeter/cmudict.json.gz` | Path to a large word-pattern JSON (or `.json.gz`) lexicon; auto-resolved from `~/.metermeter/` or `METERMETER_LEXICON_PATH`. | Allows full CMUdict-sized vocab without bundling it. |
 | `extra_lexicon_path` | `""` | Optional extra lexicon path to merge on top of base patterns. | Lets you add custom vocabulary without replacing the main lexicon. |
 
 Global toggle:
@@ -206,14 +210,14 @@ The repository uses a layered regression strategy:
   - Verifies plugin wiring, extmark rendering, backslash gating, comment filtering, and filetype enable behavior.
 
 - Python unit tests (`tests/test_nvim_*.py`)
-  - Stress-span correctness and clipping behavior.
-- LLM parsing/validation behavior with mocked responses.
-- Deterministic stress-pattern rescoring tests (meter-template consistency).
-- Non-iambic template regression tests (trochaic/anapestic/dactylic stress patterns).
-- Canonical meter accuracy floors on Shakespeare fixtures:
-  - Sonnet 18
-  - Sonnet 116
-  - Sonnet 130
+  - Stress-span correctness, clipping behavior, and multi-byte UTF-8 byte-index mapping.
+  - LLM parsing/validation behavior with mocked responses.
+  - Deterministic stress-pattern rescoring tests (meter-template consistency).
+  - Non-iambic template regression tests (trochaic/anapestic/dactylic stress patterns).
+  - Canonical meter accuracy floors on Shakespeare fixtures:
+    - Sonnet 18
+    - Sonnet 116
+    - Sonnet 130
 
 - Broader corpus regressions:
   - Non-Shakespeare formal sonnet benchmark (Milton) with iambic-pentameter floor.
@@ -221,7 +225,7 @@ The repository uses a layered regression strategy:
   - Targeted known-regression lines (Shakespeare + Milton) to protect specific historical failure cases.
     - Currently skipped due to `pattern_best_meter` instability across local models.
 
-- Cache/scheduling regressions
+- Cache/scheduling regressions:
   - Duplicate-line correctness: repeated identical lines must annotate on every row.
   - Progressive scheduling: visible lines first, then prefetch, then full-buffer completion.
   - Idle behavior: with unchanged text/viewport, periodic ticks do not trigger extra CLI work or redraw.

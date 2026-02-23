@@ -9,6 +9,7 @@ function M.new_state()
     cache = {},
     cache_size = 0,
     cache_seq = 0,
+    cache_write_seq = 0,
     cache_epoch = 0,
     scan_generation = 0,
     scan_running = false,

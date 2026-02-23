@@ -32,9 +32,10 @@ local DEFAULTS = {
     model = "qwen2.5:7b-instruct",
     timeout_ms = 30000,
     temperature = 0.1,
+    eval_mode = "production",
     max_lines_per_scan = 2,
     max_concurrent = 1,
-    hide_non_refined = false,
+    api_key = "",
     failure_threshold = 3,
     cooldown_ms = 15000,
   },
@@ -52,8 +53,6 @@ local DEFAULTS = {
 local cfg = vim.deepcopy(DEFAULTS)
 
 local state_by_buf = {}
-local ENGINE_VISIBLE_CHUNK = 12
-local ENGINE_PREFETCH_CHUNK = 20
 local run_cli
 
 local function _cache_max_entries()
@@ -346,6 +345,7 @@ local function _cache_put(st, key, payload)
     entry.payload = payload
   end
   _cache_touch(st, entry)
+  st.cache_write_seq = (tonumber(st.cache_write_seq) or 0) + 1
 
   local max_entries = _cache_max_entries()
   while (tonumber(st.cache_size) or 0) > max_entries do
@@ -461,14 +461,9 @@ local function apply_results(bufnr, results)
     if lnum and vim.api.nvim_buf_is_valid(bufnr) then
       local label = item.label or ""
       local hint = item.hint or ""
-      local src = item.source or ""
       local conf = item.confidence
       if type(conf) == "number" then
         label = tostring(item.meter_name or label or "")
-      end
-      if cfg.llm.hide_non_refined and src ~= "llm" then
-        label = ""
-        hint = ""
       end
       local show_hint = cfg.ui.show_analysis_hint and hint ~= ""
       local hint_mode = tostring(cfg.ui.analysis_hint_mode or "off")
@@ -510,10 +505,6 @@ local function apply_results(bufnr, results)
           end
         end
       end
-      -- Optional: stash hint for dump/debug.
-      if hint ~= "" then
-        -- Put it in the cache as well; we don't render it by default.
-      end
     end
   end
 
@@ -546,7 +537,7 @@ end
 
 local function maybe_apply_results(bufnr, results)
   local st = ensure_state(bufnr)
-  local sig = render_mod.render_signature(json_encode, results)
+  local sig = render_mod.render_signature(st.cache_write_seq, results)
   if sig == (st.last_render_sig or "") then
     return
   end
