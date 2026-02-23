@@ -28,7 +28,7 @@ jobs:
             https://github.com/neovim/neovim/releases/download/v0.10.2/nvim-linux64.tar.gz
           tar -C /tmp -xzf /tmp/nvim.tar.gz
           echo "/tmp/nvim-linux64/bin" >> "$GITHUB_PATH"
-          nvim --version | head -n 1
+          /tmp/nvim-linux64/bin/nvim --version | head -n 1
 
       - name: Run static checks
         shell: bash
@@ -63,7 +63,7 @@ jobs:
             https://github.com/neovim/neovim/releases/download/v0.10.2/nvim-linux64.tar.gz
           tar -C /tmp -xzf /tmp/nvim.tar.gz
           echo "/tmp/nvim-linux64/bin" >> "$GITHUB_PATH"
-          nvim --version | head -n 1
+          /tmp/nvim-linux64/bin/nvim --version | head -n 1
 
       - name: Install Neovim (macOS)
         if: runner.os == 'macOS'
@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
           brew update
           brew install neovim
-          nvim --version | head -n 1
+          /tmp/nvim-linux64/bin/nvim --version | head -n 1
 
       - name: Run smoke + unit tests
         shell: bash
