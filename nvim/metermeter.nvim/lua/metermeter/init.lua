@@ -54,6 +54,7 @@ end
 local function plugin_root()
   local src = debug.getinfo(1, "S").source
   local path = src:sub(2) -- drop leading "@"
+  path = vim.fn.resolve(path) -- resolve to absolute path
   return vim.fn.fnamemodify(path, ":p:h:h:h") -- .../lua/metermeter/init.lua -> plugin root
 end
 
