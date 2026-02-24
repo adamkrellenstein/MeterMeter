@@ -12,7 +12,7 @@ UNSTRESSED_MONOSYLLABLES = frozenset({
     # Articles
     "a", "an", "the",
     # Prepositions
-    "at", "by", "for", "from", "in", "of", "off", "on", "per", "to", "up", "with",
+    "at", "by", "for", "from", "in", "of", "on", "per", "to", "with",
     # Conjunctions
     "and", "but", "or", "nor", "if", "as", "than", "so", "yet",
     # Auxiliary / modal verbs
@@ -22,14 +22,25 @@ UNSTRESSED_MONOSYLLABLES = frozenset({
     # Pronouns
     "i", "me", "my", "he", "him", "his", "she", "her", "it", "its",
     "we", "us", "our", "they", "them", "their", "you", "your",
-    "who", "whom", "whose", "what", "which",
+    "who", "whom", "whose", "which",
     # Determiners
-    "each", "some", "this", "these", "those", "such",
+    "some", "this", "these", "those",
 })
 
-# Monosyllables that prosodic marks unstressed but are predominantly stressed in
-# verse (corpus analysis: "all" is 96% S, "there" 83% S, "not" 55% S).
-STRESSED_MONOSYLLABLES = frozenset({"all", "there", "not"})
+# Monosyllables predominantly stressed in verse (corpus analysis of 4B4V).
+# These are either wrongly marked unstressed by prosodic/CMU Dict, or were
+# incorrectly included in UNSTRESSED_MONOSYLLABLES.
+STRESSED_MONOSYLLABLES = frozenset({
+    "all",   # 96% S
+    "here",  # 100% S (prosodic marks unstressed)
+    "each",  # 89% S
+    "off",   # 80% S
+    "there", # 83% S
+    "up",    # 77% S
+    "such",  # 73% S
+    "what",  # 56% S
+    "not",   # 55% S
+})
 
 FOOT_TEMPLATES = {
     "iambic": "US",
