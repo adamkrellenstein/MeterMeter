@@ -97,7 +97,7 @@ set termguicolors
 
 ### Statusline
 
-If lualine is installed, MeterMeter automatically adds itself to `lualine_x` — no configuration needed. It shows the dominant meter when active (`MM: iambic pentameter`), `MM: …` while scanning, or an error summary on failure.
+MeterMeter shows the dominant meter in the statusline automatically — no configuration needed. If lualine is installed it injects into `lualine_x`; otherwise it patches the statusline of each metermeter window directly. The meter shows as `MM: iambic pentameter` when active, `MM: …` while the first scan runs, or an error summary on failure.
 
 ## File Enable Rules
 

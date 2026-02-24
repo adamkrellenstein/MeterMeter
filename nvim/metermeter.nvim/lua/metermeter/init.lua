@@ -873,27 +873,60 @@ function M.setup(opts)
     end
   end
 
-  -- Auto-inject into lualine if available. By VimEnter all plugins are loaded so lualine's
-  -- config is final. Guard with a global flag so re-calling setup() doesn't duplicate the component.
+  -- After all plugins load: inject into lualine if present, otherwise patch each
+  -- metermeter window's statusline directly so no configuration is ever needed.
   vim.api.nvim_create_autocmd("VimEnter", {
     once = true,
     group = group,
     callback = function()
       if vim.g._metermeter_lualine_injected then return end
-      local ok, lualine = pcall(require, "lualine")
-      if not ok or type(lualine) ~= "table" then return end
-      if type(lualine.get_config) ~= "function" or type(lualine.setup) ~= "function" then return end
-      local lualine_cfg = lualine.get_config()
-      if not lualine_cfg then return end
-      vim.g._metermeter_lualine_injected = true
-      local comp = function() return M.statusline() end
-      lualine_cfg.sections = lualine_cfg.sections or {}
-      lualine_cfg.sections.lualine_x = lualine_cfg.sections.lualine_x or {}
-      table.insert(lualine_cfg.sections.lualine_x, 1, comp)
-      lualine_cfg.inactive_sections = lualine_cfg.inactive_sections or {}
-      lualine_cfg.inactive_sections.lualine_x = lualine_cfg.inactive_sections.lualine_x or {}
-      table.insert(lualine_cfg.inactive_sections.lualine_x, 1, comp)
-      lualine.setup(lualine_cfg)
+
+      local lualine_ok, lualine = pcall(require, "lualine")
+      if lualine_ok and type(lualine) == "table"
+          and type(lualine.get_config) == "function"
+          and type(lualine.setup) == "function" then
+        local lualine_cfg = lualine.get_config()
+        if lualine_cfg then
+          vim.g._metermeter_lualine_injected = true
+          local comp = function() return M.statusline() end
+          lualine_cfg.sections = lualine_cfg.sections or {}
+          lualine_cfg.sections.lualine_x = lualine_cfg.sections.lualine_x or {}
+          table.insert(lualine_cfg.sections.lualine_x, 1, comp)
+          lualine_cfg.inactive_sections = lualine_cfg.inactive_sections or {}
+          lualine_cfg.inactive_sections.lualine_x = lualine_cfg.inactive_sections.lualine_x or {}
+          table.insert(lualine_cfg.inactive_sections.lualine_x, 1, comp)
+          lualine.setup(lualine_cfg)
+          return
+        end
+      end
+
+      -- No lualine: set the statusline for every window that shows an enabled buffer.
+      -- Only touch windows that are using the global default (empty local statusline).
+      local function patch_win(win)
+        if vim.api.nvim_win_is_valid(win) and vim.wo[win].statusline == "" then
+          vim.wo[win].statusline =
+            " %f%m  %{v:lua.require('metermeter').statusline()}  %=%-14.(%l,%c%V%)  %P "
+        end
+      end
+      for _, st_bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        local st = state_by_buf[st_bufnr]
+        if st and st.enabled then
+          for _, win in ipairs(vim.fn.win_findbuf(st_bufnr)) do
+            patch_win(win)
+          end
+        end
+      end
+      -- Also patch any future window that enters an enabled buffer.
+      vim.api.nvim_create_autocmd("BufWinEnter", {
+        group = group,
+        callback = function(args)
+          local st = state_by_buf[args.buf]
+          if st and st.enabled then
+            local win = vim.fn.bufwinid(args.buf)
+            if win ~= -1 then patch_win(win) end
+          end
+        end,
+      })
     end,
   })
 end
