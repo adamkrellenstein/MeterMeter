@@ -5,6 +5,15 @@ local scanner = require("metermeter.scanner")
 local state_mod = require("metermeter.state")
 local subprocess = require("metermeter.subprocess")
 
+local function refresh_statusline()
+  -- lualine has its own component cache that redrawstatus! alone doesn't always invalidate.
+  local ok, lualine = pcall(require, "lualine")
+  if ok and type(lualine) == "table" and type(lualine.refresh) == "function" then
+    pcall(lualine.refresh)
+  end
+  vim.cmd("redrawstatus!")
+end
+
 local ns = vim.api.nvim_create_namespace("metermeter")
 
 local DEFAULTS = {
@@ -422,7 +431,7 @@ local function maybe_apply_results(bufnr, results)
   st.last_render_sig = sig
   st.debug_apply_count = (tonumber(st.debug_apply_count) or 0) + 1
   apply_results(bufnr, results)
-  vim.cmd("redrawstatus!")
+  refresh_statusline()
 end
 
 local function build_request(bufnr, ordered_lines)
@@ -679,7 +688,7 @@ function M.enable(bufnr)
   st.enabled = true
   st.last_changedtick = -1
   st.last_view_sig = ""
-  vim.cmd("redrawstatus!")
+  refresh_statusline()
   ensure_tick(bufnr)
   schedule_scan(bufnr)
 end
@@ -691,7 +700,7 @@ function M.disable(bufnr)
   state_mod.stop_scan_state(st)
   _cleanup_timers(st)
   clear_buf(bufnr)
-  vim.cmd("redrawstatus!")
+  refresh_statusline()
 end
 
 function M.toggle(bufnr)
@@ -764,6 +773,8 @@ function M.debug_dump(bufnr)
       tonumber(st.debug_cli_count) or 0
     )
   end
+  local sl = M.statusline(bufnr)
+  summary = summary .. ("  statusline()=%q"):format(sl)
   vim.notify("MeterMeter: " .. summary, vim.log.levels.INFO)
 
   local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })
