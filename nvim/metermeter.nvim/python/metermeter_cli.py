@@ -1,43 +1,13 @@
 #!/usr/bin/env python3
 import json
-import os
 import re
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import List, Tuple
 
 from metermeter.meter_engine import LineAnalysis, MeterEngine
-from metermeter.llm_refiner import LLMRefiner
 
 WORD_TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 VOWEL_GROUP_RE = re.compile(r"[AEIOUYaeiouy]+")
-
-RESCORE_MIN_SCORE = 0.72
-RESCORE_MIN_MARGIN = 0.10
-IAMBIC_GUARD_MIN_SCORE = 0.68
-IAMBIC_GUARD_MIN_MARGIN = 0.03
-IAMBIC_GUARD_MAX_CONF = 0.75
-BASELINE_GUARD_CONF_MIN = 0.75
-BASELINE_GUARD_LLM_MAX_CONF = 0.85
-DOMINANT_RATIO_MIN = 0.75
-DOMINANT_MIN_LINES = 6
-DOMINANT_LOW_CONF = 0.65
-DOMINANT_SCORE_DELTA = 0.08
-DOMINANT_COERCION_RATIO = 0.85
-
-
-def _resolve_path(path: str, env_var: str, fallback_filenames: List[str]) -> str:
-    path = os.path.expanduser(str(path or "").strip())
-    if path and os.path.exists(path):
-        return path
-    env_path = os.environ.get(env_var, "").strip()
-    if env_path and os.path.exists(env_path):
-        return env_path
-    home = os.path.expanduser("~")
-    for name in fallback_filenames:
-        candidate = os.path.join(home, ".metermeter", name)
-        if os.path.exists(candidate):
-            return candidate
-    return path
 
 
 def _even_spans(length: int, target: int) -> List[Tuple[int, int]]:
@@ -113,7 +83,7 @@ def _stress_spans_from_syllables(text: str, syllable_positions: List[Tuple[str, 
 
 
 def _stress_spans_for_line(text: str, token_patterns: List[str]) -> List[List[int]]:
-    """Compute byte-level stress spans from per-word token patterns (fallback for LLM path)."""
+    """Compute byte-level stress spans from per-word token patterns."""
     spans: List[List[int]] = []
     matches = list(WORD_TOKEN_RE.finditer(text))
     limit = min(len(matches), len(token_patterns))
@@ -161,156 +131,9 @@ def _read_stdin_json() -> dict:
     return json.loads(raw)
 
 
-def _try_pattern_rescore(
-    meter_name: str, conf: float, pattern_best_meter: str,
-    pattern_best_score: float, pattern_best_margin: float,
-    dominant_meter: str = "", dominant_ratio: float = 0.0, **_: object,
-) -> Optional[Tuple[str, float, str]]:
-    """Override if deterministic pattern scoring strongly disagrees with LLM label."""
-    # Don't override the LLM when it agrees with an established dominant meter —
-    # pattern mismatches there are expected (first-foot inversions, substitutions).
-    if dominant_meter and dominant_ratio >= 0.80 and meter_name == dominant_meter:
-        return None
-    if (
-        pattern_best_meter
-        and pattern_best_meter != meter_name
-        and pattern_best_score >= RESCORE_MIN_SCORE
-        and pattern_best_margin >= RESCORE_MIN_MARGIN
-    ):
-        return pattern_best_meter, min(conf, pattern_best_score), "pattern_rescore"
-    return None
-
-
-def _try_iambic_guard(
-    meter_name: str, conf: float, pattern_best_meter: str,
-    pattern_best_score: float, pattern_best_margin: float,
-    stress_pattern: str, has_precomputed_context: bool = False, **_: object,
-) -> Optional[Tuple[str, float, str]]:
-    """Correct trochaic->iambic when pattern scoring confirms iambic and LLM confidence is low."""
-    if has_precomputed_context:
-        return None
-    if (
-        pattern_best_meter.startswith("iambic")
-        and meter_name.startswith("trochaic")
-        and meter_name != pattern_best_meter
-        and pattern_best_score >= IAMBIC_GUARD_MIN_SCORE
-        and pattern_best_margin >= IAMBIC_GUARD_MIN_MARGIN
-        and conf <= IAMBIC_GUARD_MAX_CONF
-    ):
-        return pattern_best_meter, min(conf, pattern_best_score), "iambic_guard"
-    return None
-
-
-def _try_baseline_guard(
-    meter_name: str, conf: float, baseline_meter: str,
-    baseline_conf: float, stress_pattern: str, has_precomputed_context: bool = False, **_: object,
-) -> Optional[Tuple[str, float, str]]:
-    """Restore baseline iambic pentameter when LLM drifted but engine was confident."""
-    if has_precomputed_context:
-        return None
-    if (
-        baseline_meter == "iambic pentameter"
-        and meter_name != baseline_meter
-        and 9 <= len(stress_pattern) <= 11
-        and baseline_conf >= BASELINE_GUARD_CONF_MIN
-        and conf <= BASELINE_GUARD_LLM_MAX_CONF
-    ):
-        return baseline_meter, min(conf, baseline_conf), "baseline_guard"
-    return None
-
-
-def _try_dominant_smoothing(
-    meter_name: str, conf: float, stress_pattern: str,
-    dominant_meter: str, dominant_ratio: float, dominant_line_count: int,
-    engine: MeterEngine, **_: object,
-) -> Optional[Tuple[str, float, str]]:
-    """Smooth toward dominant poem meter when evidence supports it."""
-    if not (
-        dominant_meter
-        and dominant_ratio >= DOMINANT_RATIO_MIN
-        and dominant_line_count >= DOMINANT_MIN_LINES
-        and meter_name != dominant_meter
-    ):
-        return None
-    dom_score = engine.score_stress_pattern_for_meter(stress_pattern, dominant_meter)
-    cur_score = engine.score_stress_pattern_for_meter(stress_pattern, meter_name)
-    if (
-        dom_score is not None
-        and cur_score is not None
-        and conf <= DOMINANT_LOW_CONF
-        and dom_score >= (cur_score + DOMINANT_SCORE_DELTA)
-    ):
-        return dominant_meter, min(conf, dom_score), "dominant_smoothing"
-    return None
-
-
-def _try_dominant_coercion(
-    meter_name: str, conf: float,
-    dominant_meter: str, dominant_ratio: float, dominant_line_count: int,
-    engine: MeterEngine, **_: object,
-) -> Optional[Tuple[str, float, str]]:
-    """Coerce to dominant when it's very strong and we have same-foot-count iambic/trochaic confusion."""
-    if (
-        not dominant_meter
-        or dominant_ratio < DOMINANT_COERCION_RATIO
-        or dominant_line_count < DOMINANT_MIN_LINES
-        or meter_name == dominant_meter
-        or conf > DOMINANT_LOW_CONF
-    ):
-        return None
-    dom = engine._parse_meter_name(dominant_meter)
-    cur = engine._parse_meter_name(meter_name)
-    if not dom or not cur:
-        return None
-    dom_foot, dom_feet = dom
-    cur_foot, cur_feet = cur
-    if dom_feet != cur_feet:
-        return None
-    if dom_foot in {"iambic", "trochaic"} and cur_foot in {"iambic", "trochaic"} and dom_foot != cur_foot:
-        return dominant_meter, min(conf, 0.70), "dominant_coercion"
-    return None
-
-
-# Override functions applied in priority order; first match wins.
-_METER_OVERRIDES = [
-    _try_pattern_rescore,
-    _try_iambic_guard,
-    _try_baseline_guard,
-    _try_dominant_smoothing,
-    _try_dominant_coercion,
-]
-
-
-def _weighted_dominant_meter(refined: Dict[int, object]) -> Tuple[str, float, int]:
-    counts: Dict[str, float] = {}
-    total = 0.0
-    n = 0
-    for _, r in refined.items():
-        meter = str(getattr(r, "meter_name", "") or "").strip().lower()
-        if not meter:
-            continue
-        conf = getattr(r, "confidence", 0.5)
-        if not isinstance(conf, (int, float)):
-            conf = 0.5
-        weight = max(0.05, min(1.0, float(conf)))
-        counts[meter] = counts.get(meter, 0.0) + weight
-        total += weight
-        n += 1
-    if not counts or total <= 0.0:
-        return "", 0.0, 0
-    meter = max(counts.items(), key=lambda kv: kv[1])[0]
-    ratio = counts[meter] / total
-    return meter, ratio, n
-
-
 def main() -> int:
     req = _read_stdin_json()
     lines = req.get("lines") or []
-    config = req.get("config") or {}
-    llm_cfg = (config.get("llm") or {}) if isinstance(config, dict) else {}
-    context_cfg = (config.get("context") or {}) if isinstance(config, dict) else {}
-
-    error_msg: Optional[str] = None
 
     engine = MeterEngine()
     analyses: List[LineAnalysis] = []
@@ -326,146 +149,24 @@ def main() -> int:
             continue
         analyses.append(a)
 
-    refined: Dict[int, object] = {}
-    llm_enabled = bool(llm_cfg.get("enabled", False))
-    endpoint = str(llm_cfg.get("endpoint", "") or "").strip()
-    model = str(llm_cfg.get("model", "") or "").strip()
-    timeout_ms = int(llm_cfg.get("timeout_ms", 30000))
-    temp = float(llm_cfg.get("temperature", 0.1))
-    max_llm = int(llm_cfg.get("max_lines_per_scan", 0))
-    eval_mode = str(llm_cfg.get("eval_mode", "production") or "production").strip().lower()
-    if eval_mode not in {"production", "strict"}:
-        eval_mode = "production"
-
-    if not llm_enabled:
-        error_msg = "llm_disabled"
-    elif not endpoint or not model:
-        error_msg = "llm_not_configured: endpoint/model required"
-    elif max_llm <= 0:
-        error_msg = "llm_not_configured: max_lines_per_scan must be > 0"
-    elif analyses:
-        try:
-            refiner = LLMRefiner(endpoint=endpoint, model=model, api_key=str(llm_cfg.get("api_key", "") or ""))
-            subset = analyses[: max_llm]
-            refined = refiner.refine_lines(
-                subset,
-                timeout_ms=timeout_ms,
-                temperature=temp,
-                eval_mode=eval_mode,
-                context=context_cfg,
-            )
-            if not refined:
-                error_msg = "llm_invalid_or_empty_response"
-        except Exception as exc:
-            error_msg = str(exc) or "llm_refine_failed"
-
     results: List[dict] = []
-    meter_normalizations = 0
-    token_repairs = 0
-    meter_overrides = 0
-    dominant_meter = ""
-    dominant_ratio = 0.0
-    dominant_line_count = 0
-    if isinstance(context_cfg, dict):
-        dominant_meter = str(context_cfg.get("dominant_meter") or "").strip().lower()
-        ctx_ratio = context_cfg.get("dominant_ratio")
-        if isinstance(ctx_ratio, (int, float)):
-            dominant_ratio = max(0.0, min(1.0, float(ctx_ratio)))
-        ctx_count = context_cfg.get("dominant_line_count")
-        if isinstance(ctx_count, int):
-            dominant_line_count = max(0, ctx_count)
-    if not dominant_meter:
-        dominant_meter, dominant_ratio, dominant_line_count = _weighted_dominant_meter(refined)
-
     for a in analyses:
-        if error_msg is not None:
-            continue
-        r = refined.get(a.line_no)
-        if r is None:
-            continue
-        meter_name = getattr(r, "meter_name", "") or ""
-        meter_name_llm = meter_name
-        meter_name_raw = getattr(r, "meter_name_raw", "") or meter_name
-        meter_name_normalized = bool(getattr(r, "meter_name_normalized", False))
-        token_repairs_applied = int(getattr(r, "token_repairs_applied", 0) or 0)
-        strict_eval_result = bool(getattr(r, "strict_eval", False))
-        conf = getattr(r, "confidence", 0.0) or 0.0
-        token_patterns = getattr(r, "token_patterns", []) or []
-        if meter_name_normalized:
-            meter_normalizations += 1
-        if token_repairs_applied > 0:
-            token_repairs += token_repairs_applied
-
-        stress_pattern = "".join(p for p in token_patterns if isinstance(p, str))
-        pattern_best_meter, pattern_best_score, pattern_debug = engine.best_meter_for_stress_pattern(stress_pattern)
-        pattern_best_margin = pattern_debug.get("margin") or 0.0
-        baseline_meter = (a.meter_name or "").strip().lower()
-        baseline_conf = float(getattr(a, "confidence", 0.0) or 0.0)
-        meter_overridden = False
-        override_reason = ""
-
-        has_precomputed_context = bool(context_cfg.get("dominant_meter")) if isinstance(context_cfg, dict) else False
-        override_ctx = dict(
-            meter_name=meter_name, conf=float(conf),
-            pattern_best_meter=pattern_best_meter,
-            pattern_best_score=pattern_best_score,
-            pattern_best_margin=pattern_best_margin,
-            stress_pattern=stress_pattern,
-            baseline_meter=baseline_meter, baseline_conf=baseline_conf,
-            dominant_meter=dominant_meter, dominant_ratio=dominant_ratio,
-            dominant_line_count=dominant_line_count, engine=engine,
-            has_precomputed_context=has_precomputed_context,
-        )
-        for override_fn in _METER_OVERRIDES:
-            result = override_fn(**override_ctx)
-            if result is not None:
-                meter_name, conf, override_reason = result
-                meter_overridden = True
-                break
-
-        if meter_overridden:
-            meter_overrides += 1
-
-        # Use prosodic syllable positions for highlighting (accurate boundaries).
         spans = _stress_spans_from_syllables(a.source_text, a.syllable_positions)
-        results.append(
-            {
-                "lnum": int(a.line_no),
-                "text": a.source_text,
-                "meter_name": meter_name,
-                "meter_name_llm": meter_name_llm,
-                "meter_name_raw": meter_name_raw,
-                "meter_name_normalized": meter_name_normalized,
-                "confidence": float(conf),
-                "token_patterns": token_patterns,
-                "stress_spans": spans,
-                "token_repairs_applied": token_repairs_applied,
-                "strict_eval": strict_eval_result,
-                "meter_overridden": meter_overridden,
-                "override_reason": override_reason,
-                "pattern_best_meter": pattern_best_meter,
-                "pattern_best_score": pattern_best_score,
-                "pattern_best_margin": pattern_best_margin,
-            }
-        )
+        results.append({
+            "lnum": int(a.line_no),
+            "text": a.source_text,
+            "meter_name": a.meter_name,
+            "confidence": float(a.confidence),
+            "stress_spans": spans,
+        })
 
     payload = {
         "results": results,
         "eval": {
-            "mode": eval_mode,
             "line_count": len(analyses),
             "result_count": len(results),
-            "meter_normalizations": meter_normalizations,
-            "token_repairs": token_repairs,
-            "meter_overrides": meter_overrides,
-            "strict": eval_mode == "strict",
-            "dominant_meter": dominant_meter,
-            "dominant_ratio": dominant_ratio,
-            "dominant_line_count": dominant_line_count,
         },
     }
-    if error_msg is not None:
-        payload["error"] = error_msg
     sys.stdout.write(json.dumps(payload, ensure_ascii=True))
     return 0
 

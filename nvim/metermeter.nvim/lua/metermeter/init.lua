@@ -15,27 +15,11 @@ local DEFAULTS = {
     stress = true,
     meter_hints = true,
     meter_hint_confidence_levels = 6, -- number of discrete tint steps (>= 2)
-    show_error_hint = true,
   },
 
   -- If true, only annotate lines that end with a trailing "\" (useful for mixed-format files).
   -- If false (default), annotate every non-comment line.
   require_trailing_backslash = false,
-
-  -- LLM analysis (required for meter output).
-  llm = {
-    enabled = true,
-    endpoint = "http://127.0.0.1:11434/v1/chat/completions",
-    model = "qwen2.5:7b-instruct",
-    timeout_ms = 30000,
-    temperature = 0.1,
-    eval_mode = "production",
-    max_lines_per_scan = 2,
-    max_concurrent = 1,
-    api_key = "",
-    failure_threshold = 3,
-    cooldown_ms = 15000,
-  },
 
   cache = {
     max_entries = 5000,
@@ -108,7 +92,6 @@ local function compute_stress_hl()
   -- Bold overlay so it stays visible even when Normal bg is pure black.
   vim.api.nvim_set_hl(0, "MeterMeterStress", { bold = true })
   vim.api.nvim_set_hl(0, "MeterMeterEOL", { link = "Comment" })
-  vim.api.nvim_set_hl(0, "MeterMeterError", { link = "WarningMsg" })
 end
 
 local function _blend_rgb(a, b, t)
@@ -327,43 +310,7 @@ local function _cache_key_for_text(st, text)
   if st and st.cache_epoch then
     epoch = tonumber(st.cache_epoch) or 0
   end
-  return table.concat({
-    tostring(cfg.llm.model or ""),
-    tostring(cfg.llm.endpoint or ""),
-    tostring(cfg.llm.eval_mode or ""),
-    tostring(cfg.llm.temperature or ""),
-    tostring(epoch),
-    text,
-  }, "\n")
-end
-
-local function _llm_in_cooldown(st)
-  local now = uv.now()
-  return now < (tonumber(st.llm_cooldown_until) or 0)
-end
-
-local function _llm_record_failure(st, msg)
-  st.llm_fail_count = (tonumber(st.llm_fail_count) or 0) + 1
-  if type(msg) == "string" and msg ~= "" then
-    st.llm_error = msg
-  end
-  local threshold = tonumber(cfg.llm and cfg.llm.failure_threshold) or 3
-  if threshold < 1 then
-    threshold = 1
-  end
-  if st.llm_fail_count >= threshold then
-    local cool = tonumber(cfg.llm and cfg.llm.cooldown_ms) or 15000
-    if cool < 0 then
-      cool = 0
-    end
-    st.llm_cooldown_until = uv.now() + cool
-    st.llm_fail_count = 0
-  end
-end
-
-local function _llm_record_success(st)
-  st.llm_fail_count = 0
-  st.llm_error = ""
+  return tostring(epoch) .. "\n" .. text
 end
 
 local function clear_buf(bufnr)
@@ -451,32 +398,6 @@ local function apply_results(bufnr, results)
       end
     end
   end
-
-  if cfg.ui.show_error_hint and #results == 0 then
-    local st = ensure_state(bufnr)
-    local msg = tostring(st.llm_error or "")
-    if msg ~= "" then
-      local line_count = vim.api.nvim_buf_line_count(bufnr)
-      if line_count > 0 then
-        local line = 0
-        for i = 0, line_count - 1 do
-          local text = (vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or "")
-          if is_scan_line(bufnr, text) then
-            line = i
-            break
-          end
-        end
-        msg = msg:gsub("%s+", " ")
-        if #msg > 120 then
-          msg = msg:sub(1, 117) .. "..."
-        end
-        vim.api.nvim_buf_set_extmark(bufnr, ns, line, 0, {
-          virt_text = { { " MeterMeter LLM error: " .. msg, "MeterMeterError" } },
-          virt_text_pos = "eol",
-        })
-      end
-    end
-  end
 end
 
 local function maybe_apply_results(bufnr, results)
@@ -490,60 +411,7 @@ local function maybe_apply_results(bufnr, results)
   apply_results(bufnr, results)
 end
 
-local function dominant_context_for_lines(bufnr, line_set)
-  local st = ensure_state(bufnr)
-  local counts = {}
-  local total = 0
-  local seen = 0
-  local line_count = vim.api.nvim_buf_line_count(bufnr)
-  for _, lnum in ipairs(line_set or {}) do
-    if lnum >= 0 and lnum < line_count then
-      local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
-      if is_scan_line(bufnr, text) then
-        local key = _cache_key_for_text(st, text)
-        local cached = _cache_get(st, key)
-        if cached and type(cached.meter_name) == "string" and cached.meter_name ~= "" then
-          local meter = string.lower(vim.trim(cached.meter_name))
-          local conf = tonumber(cached.confidence) or 0.5
-          conf = math.max(0.05, math.min(1.0, conf))
-          counts[meter] = (counts[meter] or 0) + conf
-          total = total + conf
-          seen = seen + 1
-        end
-      end
-    end
-  end
-
-  local best_meter = ""
-  local best_weight = 0
-  for meter, weight in pairs(counts) do
-    if weight > best_weight then
-      best_meter = meter
-      best_weight = weight
-    end
-  end
-
-  local ratio = 0
-  if total > 0 then
-    ratio = best_weight / total
-  end
-
-  local min_ratio = 0.75
-  local min_lines = 6
-  if best_meter ~= "" and best_meter ~= st.dominant_meter and ratio >= min_ratio and seen >= min_lines then
-    st.cache_epoch = (tonumber(st.cache_epoch) or 0) + 1
-  end
-  st.dominant_meter = best_meter
-  st.dominant_ratio = ratio
-  st.dominant_line_count = seen
-  return {
-    dominant_meter = best_meter,
-    dominant_ratio = ratio,
-    dominant_line_count = seen,
-  }
-end
-
-local function build_request(bufnr, ordered_lines, context)
+local function build_request(bufnr, ordered_lines)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
 
   local lines = {}
@@ -558,13 +426,7 @@ local function build_request(bufnr, ordered_lines, context)
     end
   end
 
-  return {
-    config = {
-      llm = vim.deepcopy(cfg.llm),
-      context = context or {},
-    },
-    lines = lines,
-  }
+  return { lines = lines }
 end
 
 local function merge_cache_and_results(bufnr, resp, ordered_lines)
@@ -579,7 +441,6 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
         text = item.text,
         meter_name = item.meter_name or "",
         confidence = item.confidence,
-        token_patterns = item.token_patterns or {},
         stress_spans = item.stress_spans or {},
       })
     end
@@ -604,7 +465,6 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
             text = text,
             meter_name = cached.meter_name or "",
             confidence = cached.confidence,
-            token_patterns = cached.token_patterns or {},
             stress_spans = cached.stress_spans or {},
           })
         end
@@ -617,15 +477,11 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
   return out
 end
 
-local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chunk_size, context_fn, on_done)
+local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chunk_size, on_done)
   local chunks = scanner.chunk_lines(lines or {}, chunk_size)
   local idx = 1
   local inflight = 0
   local done = false
-  local max_concurrent = tonumber(cfg.llm and cfg.llm.max_concurrent) or 1
-  if max_concurrent < 1 then
-    max_concurrent = 1
-  end
 
   local function finish_if_done()
     if done then
@@ -644,22 +500,14 @@ local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chun
     if not vim.api.nvim_buf_is_valid(bufnr) or not st.enabled or st.scan_generation ~= scan_generation then
       return
     end
-    while inflight < max_concurrent and idx <= #chunks do
-      local context = {}
-      if type(context_fn) == "function" then
-        local ok_ctx, built_ctx = pcall(context_fn)
-        if ok_ctx and type(built_ctx) == "table" then
-          context = built_ctx
-        end
-      end
-      local req = build_request(bufnr, chunks[idx], context)
+    while idx <= #chunks do
+      local req = build_request(bufnr, chunks[idx])
       idx = idx + 1
       if #req.lines == 0 then
         goto continue
       end
 
       st.debug_cli_count = (tonumber(st.debug_cli_count) or 0) + 1
-      st.debug_llm_cli_count = (tonumber(st.debug_llm_cli_count) or 0) + 1
       inflight = inflight + 1
       run_cli(req, function(resp, err)
         inflight = inflight - 1
@@ -669,22 +517,14 @@ local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chun
           return
         end
         if not err and resp then
-          if type(resp.error) == "string" and resp.error ~= "" then
-            _llm_record_failure(st2, resp.error)
-            maybe_apply_results(bufnr, {})
-            finish_if_done()
-            return
-          end
-          _llm_record_success(st2)
           local results = merge_cache_and_results(bufnr, resp, render_lines)
           maybe_apply_results(bufnr, results)
-        elseif err then
-          _llm_record_failure(st2, err)
-          maybe_apply_results(bufnr, {})
         end
         launch_next()
         finish_if_done()
       end)
+      -- Only one request at a time.
+      break
       ::continue::
     end
     finish_if_done()
@@ -724,11 +564,6 @@ local function do_scan(bufnr)
   if not should_run_for_buf(bufnr) then
     return
   end
-  if not cfg.llm.enabled then
-    st.llm_error = "LLM mode disabled; set llm.enabled=true"
-    maybe_apply_results(bufnr, {})
-    return
-  end
 
   local changedtick = tonumber(vim.api.nvim_buf_get_changedtick(bufnr)) or 0
   local view_sig = scanner.viewport_signature(bufnr)
@@ -753,7 +588,7 @@ local function do_scan(bufnr)
   local background_lines = scanner.subtract_lines(all_scan_lines, prioritized_lines)
   local render_lines = all_scan_lines
 
-  -- Render cached results immediately (LLM-only) to avoid blank states during async work.
+  -- Render cached results immediately to avoid blank states during async work.
   local cached_results = merge_cache_and_results(bufnr, { results = {} }, render_lines)
   maybe_apply_results(bufnr, cached_results)
   if #all_scan_lines == 0 then
@@ -761,11 +596,7 @@ local function do_scan(bufnr)
     return
   end
 
-  local llm_batch = tonumber(cfg.llm.max_lines_per_scan) or 1
-  if llm_batch < 1 then
-    llm_batch = 1
-  end
-  local llm_needs_refresh = (st.last_llm_changedtick ~= changedtick) or (st.last_llm_view_sig ~= view_sig)
+  local batch_size = 2
 
   local function finish_scan()
     local st2 = ensure_state(bufnr)
@@ -774,23 +605,9 @@ local function do_scan(bufnr)
     end
   end
 
-  if _llm_in_cooldown(st) or (not llm_needs_refresh) then
-    finish_scan()
-    return
-  end
-
-  local function context_fn()
-    return dominant_context_for_lines(bufnr, all_scan_lines)
-  end
-
-  run_chunk_phase(bufnr, gen, render_lines, visible_lines, llm_batch, context_fn, function()
-    run_chunk_phase(bufnr, gen, render_lines, prefetch_lines, llm_batch, context_fn, function()
-      run_chunk_phase(bufnr, gen, render_lines, background_lines, llm_batch, context_fn, function()
-        local st3 = ensure_state(bufnr)
-        if st3.scan_generation == gen then
-          st3.last_llm_changedtick = changedtick
-          st3.last_llm_view_sig = view_sig
-        end
+  run_chunk_phase(bufnr, gen, render_lines, visible_lines, batch_size, function()
+    run_chunk_phase(bufnr, gen, render_lines, prefetch_lines, batch_size, function()
+      run_chunk_phase(bufnr, gen, render_lines, background_lines, batch_size, function()
         finish_scan()
       end)
     end)
@@ -895,19 +712,14 @@ function M.status(bufnr)
   local auto = should_enable(bufnr)
   local effective = should_run_for_buf(bufnr)
   local override = st.user_enabled
-  local cool_ms = math.max(0, (tonumber(st.llm_cooldown_until) or 0) - uv.now())
   local msg = string.format(
-    "MeterMeter status: enabled=%s effective=%s auto=%s override=%s llm_cooldown_ms=%d llm_calls=%d dominant=%s ratio=%.2f lines=%d llm_error=%s",
+    "MeterMeter status: enabled=%s effective=%s auto=%s override=%s dominant=%s cli_calls=%d",
     tostring(st.enabled),
     tostring(effective),
     tostring(auto),
     tostring(override),
-    math.floor(cool_ms),
-    tonumber(st.debug_llm_cli_count) or 0,
     tostring(st.dominant_meter or ""),
-    tonumber(st.dominant_ratio) or 0,
-    tonumber(st.dominant_line_count) or 0,
-    tostring(st.llm_error or "")
+    tonumber(st.debug_cli_count) or 0
   )
   vim.notify(msg, vim.log.levels.INFO)
 end
@@ -917,15 +729,6 @@ function M.statusline(bufnr)
   local st = state_by_buf[bufnr]
   if not st or not st.enabled then
     return ""
-  end
-  local err = tostring(st.llm_error or "")
-  if err ~= "" then
-    -- Compact the error for statusline display.
-    err = err:gsub("%s+", " ")
-    if #err > 60 then
-      err = err:sub(1, 57) .. "..."
-    end
-    return "MM: " .. err
   end
   local meter = tostring(st.dominant_meter or "")
   if meter ~= "" then
@@ -943,7 +746,6 @@ function M._debug_stats(bufnr)
   return {
     scan_count = tonumber(st.debug_scan_count) or 0,
     cli_count = tonumber(st.debug_cli_count) or 0,
-    llm_cli_count = tonumber(st.debug_llm_cli_count) or 0,
     apply_count = tonumber(st.debug_apply_count) or 0,
     enabled = st.enabled and true or false,
     scan_running = st.scan_running and true or false,

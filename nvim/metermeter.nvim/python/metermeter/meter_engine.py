@@ -26,7 +26,7 @@ LINE_NAME_BY_FEET = {
     6: "hexameter",
 }
 
-# -- Pattern distance scoring (kept for post-LLM override logic) --
+# -- Pattern distance scoring --
 BINARY_FIRST_POS_DISCOUNT = 0.5
 LENGTH_MISMATCH_COST = 0.85
 FEMININE_ENDING_COST = 0.30
@@ -106,7 +106,7 @@ class MeterEngine:
     def tokenize(self, line: str) -> List[str]:
         return TOKEN_RE.findall(line)
 
-    # -- Template-matching helpers (used by post-LLM override scoring) --
+    # -- Template-matching helpers --
 
     def _parse_meter_name(self, meter_name: str) -> Optional[Tuple[str, int]]:
         m = METER_NAME_RE.match((meter_name or "").strip().lower())

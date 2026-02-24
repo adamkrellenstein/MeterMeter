@@ -120,7 +120,7 @@ class NvimStressSpanTests(unittest.TestCase):
             self.assertGreater(e, s)
 
     def test_stress_spans_for_line_fallback_monosyllable(self) -> None:
-        # _stress_spans_for_line is kept for the LLM override path.
+        # _stress_spans_for_line computes byte-level spans from per-word token patterns.
         line = "might"
         spans = metermeter_cli._stress_spans_for_line(line, ["S"])
         self.assertEqual(len(spans), 1)

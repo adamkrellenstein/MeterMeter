@@ -5,4 +5,3 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 "${ROOT}/scripts/run_static_checks.sh"
 "${ROOT}/scripts/run_smoke_tests.sh"
-"${ROOT}/scripts/run_llm_integration_tests.sh"
