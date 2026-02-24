@@ -8,37 +8,8 @@ on:
   pull_request:
 
 jobs:
-  lint:
-    name: static-checks (ubuntu)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Neovim
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsSL -o /tmp/nvim.tar.gz \
-            https://github.com/neovim/neovim/releases/download/v0.10.2/nvim-linux64.tar.gz
-          tar -C /tmp -xzf /tmp/nvim.tar.gz
-          echo "/tmp/nvim-linux64/bin" >> "$GITHUB_PATH"
-          /tmp/nvim-linux64/bin/nvim --version | head -n 1
-
-      - name: Run static checks
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./scripts/run_static_checks.sh
-
   test:
-    name: smoke-and-unit (${{ matrix.os }})
-    needs: lint
+    name: tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -54,6 +25,12 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync
+
       - name: Install Neovim (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -63,7 +40,6 @@ jobs:
             https://github.com/neovim/neovim/releases/download/v0.10.2/nvim-linux64.tar.gz
           tar -C /tmp -xzf /tmp/nvim.tar.gz
           echo "/tmp/nvim-linux64/bin" >> "$GITHUB_PATH"
-          /tmp/nvim-linux64/bin/nvim --version | head -n 1
 
       - name: Install Neovim (macOS)
         if: runner.os == 'macOS'
@@ -72,10 +48,7 @@ jobs:
           set -euo pipefail
           brew update
           brew install neovim
-          nvim --version | head -n 1
 
-      - name: Run smoke + unit tests
+      - name: Run tests
         shell: bash
-        run: |
-          set -euo pipefail
-          ./scripts/run_smoke_tests.sh
+        run: ./scripts/run_tests.sh

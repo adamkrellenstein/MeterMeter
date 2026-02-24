@@ -408,7 +408,14 @@ end
 
 local function maybe_apply_results(bufnr, results)
   local st = ensure_state(bufnr)
-  local sig = tostring(st.cache_write_seq or 0) .. ":" .. tostring(results and #results or 0)
+  -- Sig based on content: lnum+meter_name per result, so switching back to a
+  -- cached line with different meter triggers a re-render even when cache_write_seq
+  -- and result count haven't changed.
+  local parts = {}
+  for _, item in ipairs(results or {}) do
+    parts[#parts + 1] = tostring(item.lnum) .. "=" .. (item.meter_name or "")
+  end
+  local sig = table.concat(parts, ",")
   if sig == (st.last_render_sig or "") then
     return
   end
