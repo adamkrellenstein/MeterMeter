@@ -24,14 +24,16 @@ Two layers:
 - Each pool worker holds a pre-initialized `MeterEngine`, avoiding repeated prosodic import overhead.
 
 **Python analysis** (`nvim/metermeter.nvim/python/metermeter/`)
-- `meter_engine.py`: wraps the `prosodic` OT metrical parser. Produces a `LineAnalysis` with per-syllable stress positions, per-token patterns, meter name, foot count, and confidence.
+- `meter_engine.py`: uses prosodic's pronunciation layer (CMU Dict + eSpeak fallback) for lexical stress, with a function-word lookup table for monosyllable disambiguation. Meter is classified by template matching against the resulting stress pattern. Produces a `LineAnalysis` with per-syllable stress positions, per-token patterns, meter name, foot count, and confidence.
 
 ### Pipeline
 
 ```
 line text
-  -> MeterEngine (prosodic)  -> meter_name, confidence, syllable_positions
-  -> stress span computation -> byte-level stress spans
+  -> prosodic (pronunciation)  -> syllables + lexical stress
+  -> monosyllable rules        -> S/U stress pattern
+  -> template matching         -> meter_name, confidence
+  -> stress span computation   -> byte-level stress spans
   -> Neovim extmarks
 ```
 
@@ -41,23 +43,20 @@ The only widely-used English gold standard is [For Better For Verse](https://git
 
 | System | Approach | Per-syllable | Per-line |
 |--------|----------|-------------|----------|
-| ZeuScansion (Agirrezabal 2016) | FST + rules | 86.78% | -- |
+| Scandroid (Hartman) | Dict + rules → stress → feet | ~90% | -- |
+| ZeuScansion (Agirrezabal 2016) | Dict + POS + Groves rules → stress → template | 86.78% | -- |
 | BiLSTM-CRF (Agirrezabal 2017) | Neural sequence labeling | 92.96% | 61.39% |
-| MeterMeter | OT constraints (prosodic) | ~66% | ~71% |
+| **MeterMeter** | **Dict + function-word rules → stress → template** | **~85%** | **~73%** |
 
-Per-syllable accuracy is naturally high because most syllables are unambiguous; per-line is strict because a single wrong stress fails the whole line. MeterMeter optimizes for per-line (the user-facing metric). The main error source for all systems is context-dependent monosyllable stress (e.g. "hath", "all", "too"), which requires poem-level context to resolve.
+Per-syllable accuracy is naturally high because most syllables are unambiguous; per-line is strict because a single wrong stress fails the whole line. The main error source for all systems is context-dependent monosyllable stress (e.g. "hath", "all", "too"), which requires poem-level context to resolve.
 
-### Architectural landscape
+### How scansion engines differ
 
-English scansion systems fall into three families:
+Every system that scores well on per-syllable accuracy uses the same fundamental approach: **stress first, meter second**. Dictionary lookup determines stress for polysyllabic words (~100% correct), a function-word rule handles monosyllables (~80-85% correct), and meter is classified from the resulting pattern. The BiLSTM-CRF learns these mappings jointly from data instead of using hand-crafted rules.
 
-**Rule-based / deterministic** -- ZeuScansion (FST), libEscansión (Spanish, 97% line accuracy via recursive precedence). High precision on unambiguous lines, but brittle on edge cases. libEscansión's key insight -- try the most natural phonological adjustments first and only escalate when rules are exhausted -- transfers well to English.
+MeterMeter previously used prosodic's OT metrical parser, which works in the opposite direction: it picks the best *metrical grid* for the line and reads stress off the grid positions. This was linguistically principled but fragile -- when the parser picked the wrong template (e.g. trochaic instead of iambic), every syllable flipped, producing ~66% per-syllable accuracy. Switching to lexical stress lookup with monosyllable rules brought per-syllable accuracy to ~85% and made the engine ~80x faster (the OT parse was the bottleneck).
 
-**Neural** -- Agirrezabal's BiLSTM-CRF, Klesnilová et al.'s syllable-embedding BiLSTM-CRF (Czech, 98.9% line accuracy). Strong on ambiguity resolution but require large training corpora that don't exist for English meter. LLMs specifically fail at precise structural tasks when used alone (MetricalARGS, Chalamalasetti et al. 2025).
-
-**OT constraint-based** -- MeterMeter (via prosodic). Evaluates candidate parses against Hanson & Kiparsky's Optimality Theory constraints (\*W/PEAK, \*S/UNSTRESS, FOOTMIN), producing weighted scores rather than binary judgments. Architecturally the most linguistically grounded approach, but prosodic's exhaustive parse generation is expensive and the CMU Pronouncing Dictionary creates systematic errors on pre-modern verse (wrong stress patterns, missing syllabic "-ed", unencoded elisions).
-
-MeterMeter's current accuracy is limited primarily by pronunciation coverage (CMU Dict is modern American English only) and the lack of poem-level context in per-line analysis. The highest-leverage improvements are an Early Modern English pronunciation override layer and constrained candidate generation to replace prosodic's exponential parse space.
+The remaining gap to the BiLSTM-CRF (~93%) is mostly context-dependent monosyllable stress: function words in strong metrical positions (e.g. "to" in "thee TO a summer's day") that our rule marks as unstressed but the gold standard marks as stressed. Closing this gap would require either a trained sequence model or poem-level context awareness.
 
 ## Requirements
 
@@ -161,7 +160,7 @@ uv run pytest tests/ -q
 ```bash
 uv run pytest tests/test_nvim_stress_accuracy.py
 
-# Full 4B4V corpus (1,181 lines, ~30s)
+# Full 4B4V corpus (1,181 lines, ~7s)
 MM_TEST_MAX_LINES=0 uv run pytest tests/test_nvim_stress_accuracy.py -v -s
 ```
 

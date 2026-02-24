@@ -6,6 +6,30 @@ import prosodic
 
 TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 
+# Monosyllabic function words: default to unstressed in metrical context.
+# Based on Groves' rules (used by ZeuScansion) and the Scandroid's dictionary.
+UNSTRESSED_MONOSYLLABLES = frozenset({
+    # Articles
+    "a", "an", "the",
+    # Prepositions
+    "at", "by", "for", "from", "in", "of", "off", "on", "per", "to", "up", "with",
+    # Conjunctions
+    "and", "but", "or", "nor", "if", "as", "than", "so", "yet",
+    # Auxiliary / modal verbs
+    "am", "are", "be", "been", "can", "could", "did", "do", "does",
+    "had", "has", "have", "is", "may", "might", "must", "shall",
+    "should", "was", "were", "will", "would",
+    # Pronouns
+    "i", "me", "my", "he", "him", "his", "she", "her", "it", "its",
+    "we", "us", "our", "they", "them", "their", "you", "your",
+    "who", "whom", "whose", "what", "which",
+    # Determiners
+    "each", "no", "some", "this", "these", "those", "such",
+    "all", "both", "half",
+    # Particles / other
+    "not", "there",
+})
+
 FOOT_TEMPLATES = {
     "iambic": "US",
     "trochaic": "SU",
@@ -271,68 +295,59 @@ class MeterEngine:
             if not ptext.lines:
                 return None
             pline = ptext.lines[0]
-            bp = pline.best_parse
-            if bp is None or not bp.positions:
-                return None
         except Exception:
             return None
 
-        positions = list(bp.positions)
-
-        # Flat syllable-position list for highlighting.
-        syllable_positions = [(pos.txt.lower(), pos.meter_str == "s") for pos in positions]
-
-        # Per-word token patterns: count unique syllable numbers per wordtoken,
-        # then consume that many positions.
+        # Build stress from lexical pronunciation (CMU Dict / eSpeak),
+        # not from the OT metrical parse.  Monosyllabic function words
+        # are forced unstressed following Groves' rules.
+        syllable_positions: List[Tuple[str, bool]] = []
         token_patterns: List[str] = []
-        pos_idx = 0
+
         for wt in pline.wordtokens:
-            # Collect all syllables across all children (wordtypes/wordforms).
-            all_syls = []
-            for child in wt.children:
-                syls = getattr(child, "syllables", None)
-                if syls:
-                    all_syls.extend(syls)
-            if not all_syls:
+            wtype = wt.wordtype
+            if getattr(wtype, "is_punc", False):
                 continue
-            nsyl = len(set(s.num for s in all_syls))
+            wf = wtype.form  # first (least-stressed) pronunciation variant
+            syls = getattr(wf, "syllables", None)
+            if not syls:
+                continue
+
+            word_text = wt.txt.lower().strip("'")
+            is_mono = len(syls) == 1
             pat = ""
-            for _ in range(nsyl):
-                if pos_idx < len(positions):
-                    pat += "S" if positions[pos_idx].meter_str == "s" else "U"
-                    pos_idx += 1
-            token_patterns.append(pat or "U")
+            for syl in syls:
+                if is_mono and word_text in UNSTRESSED_MONOSYLLABLES:
+                    stressed = False
+                else:
+                    stressed = getattr(syl, "is_stressed", False)
+                syllable_positions.append((syl.txt.lower(), stressed))
+                pat += "S" if stressed else "U"
+            token_patterns.append(pat)
+
+        if not syllable_positions:
+            return None
 
         # If prosodic gave a different word count than TOKEN_RE, align to TOKEN_RE.
         if len(token_patterns) != len(tokens):
-            # Fall back: distribute positions evenly across tokens.
+            all_syls_flat = syllable_positions
             token_patterns = []
-            pos_idx = 0
             n_tokens = len(tokens)
-            n_pos = len(positions)
-            for i, tok in enumerate(tokens):
+            n_pos = len(all_syls_flat)
+            for i in range(n_tokens):
                 start = (i * n_pos) // n_tokens
                 end = ((i + 1) * n_pos) // n_tokens
                 if end <= start:
                     end = min(n_pos, start + 1)
-                pat = ""
-                for j in range(start, end):
-                    pat += "S" if positions[j].meter_str == "s" else "U"
+                pat = "".join("S" if all_syls_flat[j][1] else "U" for j in range(start, end))
                 token_patterns.append(pat or "U")
 
         stress_pattern = "".join(token_patterns)
 
-        foot_name, feet_count = _infer_meter(bp.meter_str)
-        line_name = LINE_NAME_BY_FEET.get(feet_count, f"{feet_count}-foot")
-        meter_name = f"{foot_name} {line_name}"
-
-        # Confidence: fewer constraint violations → higher confidence.
-        confidence = max(0.0, min(1.0, 1.0 / (1.0 + 0.2 * float(bp.score))))
-
-        debug_scores: Dict[str, float] = {"prosodic_score": float(bp.score)}
-        if bp.viold:
-            for k, v in bp.viold.items():
-                debug_scores[str(k)] = float(v)
+        meter_name, best_score, debug_scores = self.best_meter_for_stress_pattern(stress_pattern)
+        parsed = self._parse_meter_name(meter_name)
+        feet_count = parsed[1] if parsed else max(1, round(len(stress_pattern) / 2))
+        confidence = max(0.0, min(1.0, best_score))
 
         return LineAnalysis(
             line_no=line_no,

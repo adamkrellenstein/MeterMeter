@@ -77,7 +77,7 @@ class StressAccuracyTests(unittest.TestCase):
         self.assertGreaterEqual(len(self.corpus), 1)
 
     def test_per_syllable_accuracy_floor(self) -> None:
-        """Deterministic engine vs. 4B4V gold stress: >= 63% per-syllable agreement."""
+        """Deterministic engine vs. 4B4V gold stress: >= 83% per-syllable agreement."""
         total_matches = 0
         total_positions = 0
 
@@ -90,12 +90,12 @@ class StressAccuracyTests(unittest.TestCase):
 
         accuracy = total_matches / total_positions if total_positions > 0 else 0
         self.assertGreaterEqual(
-            accuracy, 0.63,
+            accuracy, 0.83,
             f"4B4V per-syllable stress accuracy: {accuracy:.1%} ({total_matches}/{total_positions})",
         )
 
     def test_meter_classification_accuracy_floor(self) -> None:
-        """Deterministic engine vs. 4B4V gold meter: >= 69% agreement."""
+        """Deterministic engine vs. 4B4V gold meter: >= 71% agreement."""
         correct = 0
         total = 0
 
@@ -108,12 +108,12 @@ class StressAccuracyTests(unittest.TestCase):
 
         accuracy = correct / total if total > 0 else 0
         self.assertGreaterEqual(
-            accuracy, 0.69,
+            accuracy, 0.71,
             f"4B4V meter classification accuracy: {accuracy:.1%} ({correct}/{total})",
         )
 
     def test_iambic_pentameter_stress_f1(self) -> None:
-        """Stress F1 on iambic pentameter lines specifically: >= 65%."""
+        """Stress F1 on iambic pentameter lines specifically: >= 83%."""
         tp = fp = fn = 0
 
         for predicted, _, gold, gold_meter in self.results:
@@ -133,6 +133,6 @@ class StressAccuracyTests(unittest.TestCase):
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
         self.assertGreaterEqual(
-            f1, 0.65,
+            f1, 0.83,
             f"Iambic pentameter stress F1: {f1:.1%} (P={precision:.1%} R={recall:.1%})",
         )
