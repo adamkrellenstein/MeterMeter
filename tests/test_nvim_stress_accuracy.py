@@ -90,7 +90,7 @@ class StressAccuracyTests(unittest.TestCase):
 
         accuracy = total_matches / total_positions if total_positions > 0 else 0
         self.assertGreaterEqual(
-            accuracy, 0.83,
+            accuracy, 0.85,
             f"4B4V per-syllable stress accuracy: {accuracy:.1%} ({total_matches}/{total_positions})",
         )
 
@@ -108,7 +108,7 @@ class StressAccuracyTests(unittest.TestCase):
 
         accuracy = correct / total if total > 0 else 0
         self.assertGreaterEqual(
-            accuracy, 0.71,
+            accuracy, 0.73,
             f"4B4V meter classification accuracy: {accuracy:.1%} ({correct}/{total})",
         )
 

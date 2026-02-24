@@ -25,10 +25,11 @@ UNSTRESSED_MONOSYLLABLES = frozenset({
     "who", "whom", "whose", "what", "which",
     # Determiners
     "each", "some", "this", "these", "those", "such",
-    "all",
-    # Particles / other
-    "not", "there",
 })
+
+# Monosyllables that prosodic marks unstressed but are predominantly stressed in
+# verse (corpus analysis: "all" is 96% S, "there" 83% S, "not" 55% S).
+STRESSED_MONOSYLLABLES = frozenset({"all", "there", "not"})
 
 FOOT_TEMPLATES = {
     "iambic": "US",
@@ -280,6 +281,8 @@ class MeterEngine:
             for syl in syls:
                 if is_mono and word_text in UNSTRESSED_MONOSYLLABLES:
                     stressed = False
+                elif is_mono and word_text in STRESSED_MONOSYLLABLES:
+                    stressed = True
                 else:
                     stressed = getattr(syl, "is_stressed", False)
                 syllable_positions.append((syl.txt.lower(), stressed))
