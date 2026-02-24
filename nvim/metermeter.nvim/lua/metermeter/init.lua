@@ -422,6 +422,7 @@ local function maybe_apply_results(bufnr, results)
   st.last_render_sig = sig
   st.debug_apply_count = (tonumber(st.debug_apply_count) or 0) + 1
   apply_results(bufnr, results)
+  vim.cmd("redrawstatus")
 end
 
 local function build_request(bufnr, ordered_lines)
@@ -703,27 +704,6 @@ function M.toggle(bufnr)
   end
 end
 
-function M.status(bufnr)
-  bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
-  local st = ensure_state(bufnr)
-
-  local msg
-  if st.last_error then
-    msg = "MeterMeter error: " .. tostring(st.last_error)
-    vim.notify(msg, vim.log.levels.ERROR)
-  elseif not st.enabled then
-    if should_enable(bufnr) then
-      msg = "MeterMeter: off (manually disabled)"
-    else
-      msg = "MeterMeter: off (no metermeter filetype)"
-    end
-    vim.notify(msg, vim.log.levels.INFO)
-  else
-    local meter = st.dominant_meter ~= "" and st.dominant_meter or "(scanning...)"
-    vim.notify("MeterMeter: " .. meter, vim.log.levels.INFO)
-  end
-end
-
 function M.statusline(bufnr)
   bufnr = (bufnr == 0 or bufnr == nil) and vim.api.nvim_get_current_buf() or bufnr
   local st = state_by_buf[bufnr]
@@ -731,20 +711,12 @@ function M.statusline(bufnr)
     return ""
   end
   if st.last_error then
-    -- Show a short, useful error: strip verbose stderr down to the first meaningful line.
     local msg = tostring(st.last_error)
-    -- Extract the last "Error:" or "ModuleNotFoundError:" line for conciseness.
     local short = msg:match("[%w]*Error[%w]*:[^\n]*") or msg:sub(1, 60)
     return "MM: error: " .. short
   end
   local meter = tostring(st.dominant_meter or "")
-  if meter ~= "" then
-    return "MM: " .. meter
-  end
-  if st.scan_running then
-    return "MM: scanning"
-  end
-  return "MM"
+  return "MM: " .. (meter ~= "" and meter or "…")
 end
 
 function M._debug_stats(bufnr)
@@ -762,6 +734,9 @@ end
 function M.rescan(bufnr)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
+  -- Bump cache_epoch so all cached results are invalidated and lines are re-analyzed from scratch.
+  st.cache_epoch = (tonumber(st.cache_epoch) or 0) + 1
+  st.last_render_sig = ""
   state_mod.stop_scan_state(st)
   schedule_scan(bufnr)
 end
@@ -784,7 +759,12 @@ function M.dump_debug(bufnr)
     if f then
       f:write(enc)
       f:close()
+      vim.notify("MeterMeter: debug dump written to " .. path, vim.log.levels.INFO)
+    else
+      vim.notify("MeterMeter: could not write to " .. path, vim.log.levels.WARN)
     end
+  else
+    vim.notify("MeterMeter: failed to encode debug dump: " .. tostring(enc), vim.log.levels.WARN)
   end
 end
 

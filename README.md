@@ -35,21 +35,29 @@ line text
   -> Neovim extmarks
 ```
 
-### Design rationale
+## Comparison with other English scansion systems
 
-Per-line meter accuracy is inherently limited for all systems because context-dependent monosyllable stress (e.g. "hath", "all", "too") can only be resolved with poem-level context.
+The only widely-used English gold standard is [For Better For Verse](https://github.com/waynegraham/for_better_for_verse) (4B4V): ~1,100 annotated lines across 85 poems, 16th--20th century.
 
-### Benchmark results
+| System | Approach | Per-syllable | Per-line |
+|--------|----------|-------------|----------|
+| ZeuScansion (Agirrezabal 2016) | FST + rules | 86.78% | -- |
+| BiLSTM-CRF (Agirrezabal 2017) | Neural sequence labeling | 92.96% | 61.39% |
+| MeterMeter | OT constraints (prosodic) | ~66% | ~71% |
 
-On the For Better For Verse (4B4V) annotated corpus (1,181 lines, 85 poems):
+Per-syllable accuracy is naturally high because most syllables are unambiguous; per-line is strict because a single wrong stress fails the whole line. MeterMeter optimizes for per-line (the user-facing metric). The main error source for all systems is context-dependent monosyllable stress (e.g. "hath", "all", "too"), which requires poem-level context to resolve.
 
-| System | Per-syllable | Per-line meter |
-|--------|-------------|---------------|
-| ZeuScansion (FST + rules, 2016) | 86.78% | -- |
-| BiLSTM-CRF (Agirrezabal, 2017) | 92.96% | 61.39% |
-| MeterMeter (prosodic) | ~66% | ~71% |
+### Architectural landscape
 
-Note: per-syllable and per-line measure different things. Per-syllable is high because most syllables are unambiguous; per-line is low because a single monosyllable stress error fails the whole line. MeterMeter optimizes for per-line accuracy (the user-facing metric).
+English scansion systems fall into three families:
+
+**Rule-based / deterministic** -- ZeuScansion (FST), libEscansión (Spanish, 97% line accuracy via recursive precedence). High precision on unambiguous lines, but brittle on edge cases. libEscansión's key insight -- try the most natural phonological adjustments first and only escalate when rules are exhausted -- transfers well to English.
+
+**Neural** -- Agirrezabal's BiLSTM-CRF, Klesnilová et al.'s syllable-embedding BiLSTM-CRF (Czech, 98.9% line accuracy). Strong on ambiguity resolution but require large training corpora that don't exist for English meter. LLMs specifically fail at precise structural tasks when used alone (MetricalARGS, Chalamalasetti et al. 2025).
+
+**OT constraint-based** -- MeterMeter (via prosodic). Evaluates candidate parses against Hanson & Kiparsky's Optimality Theory constraints (\*W/PEAK, \*S/UNSTRESS, FOOTMIN), producing weighted scores rather than binary judgments. Architecturally the most linguistically grounded approach, but prosodic's exhaustive parse generation is expensive and the CMU Pronouncing Dictionary creates systematic errors on pre-modern verse (wrong stress patterns, missing syllabic "-ed", unencoded elisions).
+
+MeterMeter's current accuracy is limited primarily by pronunciation coverage (CMU Dict is modern American English only) and the lack of poem-level context in per-line analysis. The highest-leverage improvements are an Early Modern English pronunciation override layer and constrained candidate generation to replace prosodic's exponential parse space.
 
 ## Requirements
 
@@ -84,19 +92,17 @@ set termguicolors
 ## Usage
 
 - `:MeterMeterToggle`
-- `:MeterMeterRescan`
-- `:MeterMeterDump` (writes to `debug_dump_path`)
-- `:MeterMeterStatus` (shows enable state, filetype match)
+- `:MeterMeterRescan` — invalidates cache and re-analyzes the whole buffer from scratch
+- `:MeterMeterDump` — writes extmark/state JSON to `debug_dump_path` and notifies with the path
 
 ### Statusline
 
 `require("metermeter").statusline()` returns:
 
 - `""` when inactive
-- `"MM: iambic pentameter"` (or dominant meter)
-- `"MM: error: ModuleNotFoundError: ..."` on CLI failure
-- `"MM: scanning"` during a scan
-- `"MM"`
+- `"MM: iambic pentameter"` (or dominant meter, always shown when active)
+- `"MM: …"` while the first scan is in progress
+- `"MM: error: ModuleNotFoundError: ..."` on subprocess failure
 
 ```lua
 require("lualine").setup({
@@ -202,6 +208,6 @@ The `id` is echoed in the response so Lua can match responses to callbacks (requ
 
 ## Troubleshooting
 
-- No annotations appear: check that `&filetype` includes `metermeter`; run `:MeterMeterStatus`.
+- No annotations appear: check that `&filetype` includes `metermeter` and that the statusline shows `MM: …` or a meter name.
 - Unexpected highlights: run `:MeterMeterDump` and inspect the JSON at `debug_dump_path`.
 - `espeak` warnings from prosodic: install espeak (`brew install espeak` / `apt install espeak`). Without it, OOV words fall back to a neural heuristic which may be slower or less accurate.
