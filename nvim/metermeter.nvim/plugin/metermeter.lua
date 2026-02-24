@@ -15,7 +15,7 @@ vim.api.nvim_create_user_command("MeterMeterRescan", function()
   require("metermeter").rescan(0)
 end, {})
 
-vim.api.nvim_create_user_command("MeterMeterDump", function()
-  require("metermeter").dump_debug(0)
+vim.api.nvim_create_user_command("MeterMeterDebug", function()
+  require("metermeter").debug_dump(0)
 end, {})
 

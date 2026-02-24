@@ -741,15 +741,42 @@ function M.rescan(bufnr)
   schedule_scan(bufnr)
 end
 
-function M.dump_debug(bufnr)
+function M.debug_dump(bufnr)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
+  local ft = (vim.bo[bufnr] and vim.bo[bufnr].filetype) or ""
+  local auto_on = should_enable(bufnr)
+
+  -- Always emit a summary line so this is useful even when disabled.
+  local summary
+  if st.last_error then
+    summary = ("enabled=%s ft=%s error=%s"):format(tostring(st.enabled), ft, tostring(st.last_error):match("[^\n]*"))
+  elseif not st.enabled then
+    local reason = auto_on and "manually disabled" or ("ft=%q has no metermeter token"):format(ft)
+    summary = ("enabled=false  %s"):format(reason)
+  else
+    summary = ("enabled=true  ft=%s  dominant=%s  scans=%d  requests=%d"):format(
+      ft,
+      st.dominant_meter ~= "" and st.dominant_meter or "(none yet)",
+      tonumber(st.debug_scan_count) or 0,
+      tonumber(st.debug_cli_count) or 0
+    )
+  end
+  vim.notify("MeterMeter: " .. summary, vim.log.levels.INFO)
+
   local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })
   local out = {
     ts = os.time(),
     bufnr = bufnr,
     file = vim.api.nvim_buf_get_name(bufnr) or "",
+    filetype = ft,
     enabled = st.enabled,
+    auto_enable = auto_on,
+    user_enabled = st.user_enabled,
+    dominant_meter = st.dominant_meter,
+    last_error = st.last_error,
+    debug_scan_count = st.debug_scan_count,
+    debug_cli_count = st.debug_cli_count,
     extmarks = marks,
   }
   local path = cfg.debug_dump_path or "/tmp/metermeter_nvim_dump.json"
@@ -759,12 +786,12 @@ function M.dump_debug(bufnr)
     if f then
       f:write(enc)
       f:close()
-      vim.notify("MeterMeter: debug dump written to " .. path, vim.log.levels.INFO)
+      vim.notify("MeterMeter: full dump written to " .. path, vim.log.levels.INFO)
     else
       vim.notify("MeterMeter: could not write to " .. path, vim.log.levels.WARN)
     end
   else
-    vim.notify("MeterMeter: failed to encode debug dump: " .. tostring(enc), vim.log.levels.WARN)
+    vim.notify("MeterMeter: failed to encode dump: " .. tostring(enc), vim.log.levels.WARN)
   end
 end
 

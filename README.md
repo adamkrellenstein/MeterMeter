@@ -93,7 +93,7 @@ set termguicolors
 
 - `:MeterMeterToggle`
 - `:MeterMeterRescan` — invalidates cache and re-analyzes the whole buffer from scratch
-- `:MeterMeterDump` — writes extmark/state JSON to `debug_dump_path` and notifies with the path
+- `:MeterMeterDebug` — prints a one-line summary (works even when disabled) and writes full state JSON to `debug_dump_path`
 
 ### Statusline
 
