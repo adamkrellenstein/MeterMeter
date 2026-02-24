@@ -17,6 +17,8 @@ UNSTRESSED_MONOSYLLABLES = frozenset({
     "and", "but", "or", "nor", "if", "as", "than", "so", "yet",
     # Contractions / particles that prosodic marks stressed but behave as clitics
     "twas", "tis",
+    # Verbs that prosodic marks stressed but are function-word-like in verse
+    "let",
     # Auxiliary / modal verbs
     "am", "are", "be", "been", "can", "could", "did", "do", "does",
     "had", "has", "have", "is", "may", "might", "must", "shall",
@@ -50,6 +52,8 @@ STRESSED_MONOSYLLABLES = frozenset({
     "one",   # 79% S
     "what",  # 56% S
     "not",   # 55% S
+    "then",  # 61% S (discourse connector, often in strong position)
+    "art",   # 64% S (archaic 2nd-person "thou art")
 })
 
 FOOT_TEMPLATES = {
