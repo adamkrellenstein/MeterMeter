@@ -24,8 +24,8 @@ UNSTRESSED_MONOSYLLABLES = frozenset({
     "we", "us", "our", "they", "them", "their", "you", "your",
     "who", "whom", "whose", "what", "which",
     # Determiners
-    "each", "no", "some", "this", "these", "those", "such",
-    "all", "both", "half",
+    "each", "some", "this", "these", "those", "such",
+    "all",
     # Particles / other
     "not", "there",
 })
@@ -274,7 +274,7 @@ class MeterEngine:
             if not syls:
                 continue
 
-            word_text = wt.txt.lower().strip("'")
+            word_text = wt.txt.strip().lower().strip("'")
             is_mono = len(syls) == 1
             pat = ""
             for syl in syls:
