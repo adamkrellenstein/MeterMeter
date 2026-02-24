@@ -3,6 +3,7 @@ local uv = vim.uv or vim.loop
 local M = {}
 local scanner = require("metermeter.scanner")
 local state_mod = require("metermeter.state")
+local subprocess = require("metermeter.subprocess")
 
 local ns = vim.api.nvim_create_namespace("metermeter")
 
@@ -31,7 +32,7 @@ local DEFAULTS = {
 local cfg = vim.deepcopy(DEFAULTS)
 
 local state_by_buf = {}
-local run_cli
+local subprocess_cmd
 
 local function _cache_max_entries()
   local n = tonumber(cfg.cache and cfg.cache.max_entries) or 5000
@@ -320,10 +321,15 @@ local function clear_buf(bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 end
 
-local function default_cli_cmd()
+local function default_subprocess_cmd()
   local root = plugin_root()
   local script = root .. "/python/metermeter_cli.py"
-  return { "python3", script }
+  -- Prefer the project venv Python (2 levels up from plugin root) over bare python3,
+  -- which may resolve to a system Python without prosodic installed.
+  local project_root = vim.fn.fnamemodify(root, ":h:h")
+  local venv_python = project_root .. "/.venv/bin/python3"
+  local python = vim.fn.executable(venv_python) == 1 and venv_python or "python3"
+  return { python, script }
 end
 
 local function apply_results(bufnr, results)
@@ -474,82 +480,68 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
   table.sort(out, function(a, b)
     return (a.lnum or 0) < (b.lnum or 0)
   end)
+
+  -- Compute dominant meter from cached results.
+  local counts = {}
+  local total = 0
+  for _, item in ipairs(out) do
+    local meter = item.meter_name or ""
+    if meter ~= "" then
+      local conf = tonumber(item.confidence) or 0.5
+      conf = math.max(0.05, math.min(1.0, conf))
+      counts[meter] = (counts[meter] or 0) + conf
+      total = total + conf
+    end
+  end
+  local best_meter = ""
+  local best_weight = 0
+  for meter, weight in pairs(counts) do
+    if weight > best_weight then
+      best_meter = meter
+      best_weight = weight
+    end
+  end
+  st.dominant_meter = best_meter
+
   return out
 end
 
-local function run_chunk_phase(bufnr, scan_generation, render_lines, lines, chunk_size, on_done)
-  local chunks = scanner.chunk_lines(lines or {}, chunk_size)
-  local idx = 1
-  local inflight = 0
-  local done = false
-
-  local function finish_if_done()
-    if done then
-      return
-    end
-    if idx > #chunks and inflight == 0 then
-      done = true
-      if on_done then
-        on_done()
-      end
-    end
+local function run_phase(bufnr, scan_generation, render_lines, lines, on_done)
+  local st = ensure_state(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) or not st.enabled or st.scan_generation ~= scan_generation then
+    if on_done then on_done() end
+    return
   end
 
-  local function launch_next()
-    local st = ensure_state(bufnr)
-    if not vim.api.nvim_buf_is_valid(bufnr) or not st.enabled or st.scan_generation ~= scan_generation then
-      return
-    end
-    while idx <= #chunks do
-      local req = build_request(bufnr, chunks[idx])
-      idx = idx + 1
-      if #req.lines == 0 then
-        goto continue
-      end
-
-      st.debug_cli_count = (tonumber(st.debug_cli_count) or 0) + 1
-      inflight = inflight + 1
-      run_cli(req, function(resp, err)
-        inflight = inflight - 1
-        local st2 = ensure_state(bufnr)
-        if not vim.api.nvim_buf_is_valid(bufnr) or not st2.enabled or st2.scan_generation ~= scan_generation then
-          finish_if_done()
-          return
-        end
-        if not err and resp then
-          local results = merge_cache_and_results(bufnr, resp, render_lines)
-          maybe_apply_results(bufnr, results)
-        end
-        launch_next()
-        finish_if_done()
-      end)
-      -- Only one request at a time.
-      break
-      ::continue::
-    end
-    finish_if_done()
+  local req = build_request(bufnr, lines)
+  if #req.lines == 0 then
+    if on_done then on_done() end
+    return
   end
 
-  launch_next()
-end
+  st.debug_cli_count = (tonumber(st.debug_cli_count) or 0) + 1
 
-run_cli = function(input, cb)
-  local cmd = default_cli_cmd()
-  local text = vim.json.encode(input)
-  vim.system(cmd, { stdin = text, text = true }, function(res)
-    -- vim.system callbacks run in a "fast event" context; bounce back to main loop.
-    vim.schedule(function()
-      if res.code ~= 0 then
-        cb(nil, "cli exited " .. tostring(res.code) .. ": " .. (res.stderr or ""))
-        return
-      end
-      local ok, obj = pcall(vim.json.decode, res.stdout or "")
-      if not ok then
-        cb(nil, "bad json from cli: " .. tostring(obj))
-        return
-      end
-      cb(obj, nil)
-    end)
+  local cmd = subprocess_cmd or default_subprocess_cmd()
+  if not subprocess.ensure_running(cmd) then
+    st.last_error = "failed to start metermeter subprocess (restart limit reached)"
+    if on_done then on_done() end
+    return
+  end
+
+  subprocess.send(req, function(resp, err)
+    local st2 = ensure_state(bufnr)
+    if not vim.api.nvim_buf_is_valid(bufnr) or not st2.enabled or st2.scan_generation ~= scan_generation then
+      if on_done then on_done() end
+      return
+    end
+    if err then
+      st2.last_error = err
+    elseif resp then
+      st2.last_error = nil
+      local results = merge_cache_and_results(bufnr, resp, render_lines)
+      maybe_apply_results(bufnr, results)
+    end
+    if on_done then on_done() end
   end)
 end
 
@@ -596,8 +588,6 @@ local function do_scan(bufnr)
     return
   end
 
-  local batch_size = 2
-
   local function finish_scan()
     local st2 = ensure_state(bufnr)
     if st2.scan_generation == gen then
@@ -605,9 +595,9 @@ local function do_scan(bufnr)
     end
   end
 
-  run_chunk_phase(bufnr, gen, render_lines, visible_lines, batch_size, function()
-    run_chunk_phase(bufnr, gen, render_lines, prefetch_lines, batch_size, function()
-      run_chunk_phase(bufnr, gen, render_lines, background_lines, batch_size, function()
+  run_phase(bufnr, gen, render_lines, visible_lines, function()
+    run_phase(bufnr, gen, render_lines, prefetch_lines, function()
+      run_phase(bufnr, gen, render_lines, background_lines, function()
         finish_scan()
       end)
     end)
@@ -709,19 +699,22 @@ end
 function M.status(bufnr)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
-  local auto = should_enable(bufnr)
-  local effective = should_run_for_buf(bufnr)
-  local override = st.user_enabled
-  local msg = string.format(
-    "MeterMeter status: enabled=%s effective=%s auto=%s override=%s dominant=%s cli_calls=%d",
-    tostring(st.enabled),
-    tostring(effective),
-    tostring(auto),
-    tostring(override),
-    tostring(st.dominant_meter or ""),
-    tonumber(st.debug_cli_count) or 0
-  )
-  vim.notify(msg, vim.log.levels.INFO)
+
+  local msg
+  if st.last_error then
+    msg = "MeterMeter error: " .. tostring(st.last_error)
+    vim.notify(msg, vim.log.levels.ERROR)
+  elseif not st.enabled then
+    if should_enable(bufnr) then
+      msg = "MeterMeter: off (manually disabled)"
+    else
+      msg = "MeterMeter: off (no metermeter filetype)"
+    end
+    vim.notify(msg, vim.log.levels.INFO)
+  else
+    local meter = st.dominant_meter ~= "" and st.dominant_meter or "(scanning...)"
+    vim.notify("MeterMeter: " .. meter, vim.log.levels.INFO)
+  end
 end
 
 function M.statusline(bufnr)
@@ -729,6 +722,13 @@ function M.statusline(bufnr)
   local st = state_by_buf[bufnr]
   if not st or not st.enabled then
     return ""
+  end
+  if st.last_error then
+    -- Show a short, useful error: strip verbose stderr down to the first meaningful line.
+    local msg = tostring(st.last_error)
+    -- Extract the last "Error:" or "ModuleNotFoundError:" line for conciseness.
+    local short = msg:match("[%w]*Error[%w]*:[^\n]*") or msg:sub(1, 60)
+    return "MM: error: " .. short
   end
   local meter = tostring(st.dominant_meter or "")
   if meter ~= "" then
@@ -784,6 +784,7 @@ end
 function M.setup(opts)
   opts = opts or {}
   cfg = vim.tbl_deep_extend("force", vim.deepcopy(DEFAULTS), opts)
+  subprocess_cmd = default_subprocess_cmd()
 
   compute_stress_hl()
   compute_eol_hls()
@@ -796,6 +797,10 @@ function M.setup(opts)
   })
 
   local group = vim.api.nvim_create_augroup("MeterMeter", { clear = true })
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = group,
+    callback = function() subprocess.shutdown() end,
+  })
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile", "BufEnter" }, {
     group = group,
     callback = function(args)

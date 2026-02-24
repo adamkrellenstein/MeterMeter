@@ -16,11 +16,12 @@ Two layers:
 - Runs progressive scan phases: `visible -> prefetch -> rest-of-buffer`.
 - Maintains a per-buffer LRU cache keyed by `(cache_epoch, line_text)`.
 - Renders stress extmarks and aligned end-of-line meter hints.
+- Manages a single persistent Python subprocess via `subprocess.lua` (spawned lazily, kept alive for the session).
 
-**Python CLI** (`nvim/metermeter.nvim/python/metermeter_cli.py`)
-- Bridges Neovim and the analysis engine via a stdin/stdout JSON protocol.
-- Runs `MeterEngine` on each line to produce meter name, confidence, and syllable positions.
-- Computes stress-highlight byte spans from syllable positions.
+**Python subprocess** (`nvim/metermeter.nvim/python/metermeter_cli.py`)
+- Communicates with Neovim via newline-delimited JSON over stdin/stdout.
+- Uses a `ProcessPoolExecutor` (sized to half the CPU count by default) to analyze lines in parallel.
+- Each pool worker holds a pre-initialized `MeterEngine`, avoiding repeated prosodic import overhead.
 
 **Python analysis** (`nvim/metermeter.nvim/python/metermeter/`)
 - `meter_engine.py`: wraps the `prosodic` OT metrical parser. Produces a `LineAnalysis` with per-syllable stress positions, per-token patterns, meter name, foot count, and confidence.
@@ -53,7 +54,7 @@ Note: per-syllable and per-line measure different things. Per-syllable is high b
 ## Requirements
 
 - Neovim 0.10+
-- Python 3.11+ (`python3` on PATH)
+- Python 3.11+ (the plugin prefers `.venv/bin/python3` from the project root, falling back to `python3` on PATH)
 - [`prosodic`](https://github.com/quadrismegistus/prosodic) Python package (installed in the venv)
 - `espeak` system package (used by prosodic for out-of-vocabulary words; install with `brew install espeak` or `apt install espeak`)
 
@@ -93,6 +94,7 @@ set termguicolors
 
 - `""` when inactive
 - `"MM: iambic pentameter"` (or dominant meter)
+- `"MM: error: ModuleNotFoundError: ..."` on CLI failure
 - `"MM: scanning"` during a scan
 - `"MM"`
 
@@ -161,10 +163,9 @@ require("metermeter").setup({ ... })
 uv run pytest tests/ -q
 ```
 
-**Corpus accuracy test** (runs 14 lines by default; slow):
+**Corpus accuracy test** (runs 14 lines by default; set `MM_TEST_MAX_LINES=0` for the full corpus):
 
 ```bash
-# Quick smoke (14 lines, ~4s, accuracy assertions skipped as statistically meaningless)
 uv run pytest tests/test_nvim_stress_accuracy.py
 
 # Full 4B4V corpus (1,181 lines, ~30s)
@@ -183,37 +184,21 @@ uv run python benchmarks/run_benchmark.py --progress
 ./scripts/run_smoke_tests.sh
 ```
 
-## CLI JSON Protocol
+## Subprocess JSON Protocol
 
-The Neovim layer communicates with the Python CLI via stdin/stdout JSON.
+The Neovim layer communicates with the Python subprocess via newline-delimited JSON over stdin/stdout. Each message is a single line.
 
-**Input:**
+**Request (Lua → Python):**
 ```json
-{
-  "lines": [
-    { "lnum": 0, "text": "Shall I compare thee to a summer's day?" }
-  ]
-}
+{"id": 1, "lines": [{"lnum": 0, "text": "Shall I compare thee to a summer's day?"}]}
 ```
 
-**Output:**
+**Response (Python → Lua):**
 ```json
-{
-  "results": [
-    {
-      "lnum": 0,
-      "text": "Shall I compare thee to a summer's day?",
-      "meter_name": "iambic pentameter",
-      "confidence": 0.9,
-      "stress_spans": [[9, 12], [24, 28]]
-    }
-  ],
-  "eval": {
-    "line_count": 1,
-    "result_count": 1
-  }
-}
+{"id": 1, "results": [{"lnum": 0, "text": "Shall I compare thee to a summer's day?", "meter_name": "iambic pentameter", "confidence": 0.9, "stress_spans": [[9, 12], [24, 28]]}], "eval": {"line_count": 1, "result_count": 1}}
 ```
+
+The `id` is echoed in the response so Lua can match responses to callbacks (requests and responses may interleave). Shutdown: `{"shutdown": true}` causes the subprocess to exit cleanly.
 
 ## Troubleshooting
 

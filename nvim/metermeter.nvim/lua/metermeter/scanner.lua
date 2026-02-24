@@ -121,24 +121,4 @@ function M.viewport_signature(bufnr)
   return table.concat(parts, "|")
 end
 
-function M.chunk_lines(lines, chunk_size)
-  local out = {}
-  local size = tonumber(chunk_size) or 1
-  if size < 1 then
-    size = 1
-  end
-  local n = #lines
-  local i = 1
-  while i <= n do
-    local chunk = {}
-    local jmax = math.min(n, i + size - 1)
-    for j = i, jmax do
-      table.insert(chunk, lines[j])
-    end
-    table.insert(out, chunk)
-    i = jmax + 1
-  end
-  return out
-end
-
 return M

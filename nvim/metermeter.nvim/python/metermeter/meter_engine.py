@@ -52,7 +52,6 @@ class LineAnalysis:
     meter_name: str
     feet_count: int
     confidence: float
-    oov_tokens: List[str]
     debug_scores: Dict[str, float]
     token_patterns: List[str] = field(default_factory=list)
     # Flat per-syllable (text, is_strong) pairs from prosodic, used for highlighting.
@@ -343,7 +342,6 @@ class MeterEngine:
             meter_name=meter_name,
             feet_count=feet_count,
             confidence=confidence,
-            oov_tokens=[],
             debug_scores=debug_scores,
             token_patterns=token_patterns,
             syllable_positions=syllable_positions,

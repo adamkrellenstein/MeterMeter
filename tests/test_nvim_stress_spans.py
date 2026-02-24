@@ -118,12 +118,3 @@ class NvimStressSpanTests(unittest.TestCase):
             self.assertGreaterEqual(s, 0)
             self.assertLessEqual(e, encoded_len)
             self.assertGreater(e, s)
-
-    def test_stress_spans_for_line_fallback_monosyllable(self) -> None:
-        # _stress_spans_for_line computes byte-level spans from per-word token patterns.
-        line = "might"
-        spans = metermeter_cli._stress_spans_for_line(line, ["S"])
-        self.assertEqual(len(spans), 1)
-        s, e = spans[0]
-        self.assertEqual(s, 1)  # vowel nucleus "i" at index 1
-        self.assertEqual(e, len(line))

@@ -32,7 +32,6 @@ class LineResult:
     baseline_stress: str = ""
     baseline_token_patterns: List[str] = field(default_factory=list)
     baseline_confidence: float = 0.0
-    baseline_oov_tokens: List[str] = field(default_factory=list)
     meter_correct: bool = False
     stress_hamming: int = 0
     stress_accuracy: float = 0.0
@@ -77,7 +76,6 @@ def run_deterministic(engine: MeterEngine, lines: List[BenchmarkLine]) -> Dict[i
             r.baseline_stress = analysis.stress_pattern
             r.baseline_token_patterns = list(analysis.token_patterns)
             r.baseline_confidence = analysis.confidence
-            r.baseline_oov_tokens = list(analysis.oov_tokens)
 
             gold = line.gold_meter.strip().lower()
             r.meter_correct = r.baseline_meter.strip().lower() == gold
@@ -102,10 +100,6 @@ def compile_report(results: Dict[int, LineResult]) -> Dict[str, object]:
     all_stress = "".join(r.baseline_stress for r in results.values())
     all_gold_stress = "".join(r.line.gold_stress for r in results.values())
     stress_f1 = _stress_f1(all_stress, all_gold_stress)
-
-    # OOV rate
-    total_tokens = sum(max(1, len(r.baseline_token_patterns)) for r in results.values())
-    total_oov = sum(len(r.baseline_oov_tokens) for r in results.values())
 
     # Confusion matrix (meter types)
     confusion: Dict[str, Dict[str, int]] = {}
@@ -151,7 +145,6 @@ def compile_report(results: Dict[int, LineResult]) -> Dict[str, object]:
             "gold_stress": r.line.gold_stress,
             "predicted_stress": r.baseline_stress,
             "stress_accuracy": round(r.stress_accuracy, 3),
-            "oov_tokens": r.baseline_oov_tokens,
         })
 
     return {
@@ -159,7 +152,6 @@ def compile_report(results: Dict[int, LineResult]) -> Dict[str, object]:
         "meter_accuracy": round(meter_correct / total, 4),
         "stress_accuracy_mean": round(sum(stress_accs) / len(stress_accs), 4) if stress_accs else 0.0,
         "stress_f1": {k: round(v, 4) if isinstance(v, float) else v for k, v in stress_f1.items()},
-        "oov_rate": round(total_oov / total_tokens, 4) if total_tokens > 0 else 0.0,
         "confusion_matrix": confusion,
         "by_meter": by_meter,
         "by_century": by_century,
