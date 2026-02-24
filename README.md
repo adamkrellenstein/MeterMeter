@@ -97,14 +97,7 @@ set termguicolors
 
 ### Statusline
 
-If lualine is installed, MeterMeter automatically injects itself into `lualine_x` on startup — no configuration needed. The component returns:
-
-- `""` when inactive (hidden by lualine)
-- `"MM: iambic pentameter"` (dominant meter, always shown when active)
-- `"MM: …"` while the first scan is in progress
-- `"MM: error: ModuleNotFoundError: ..."` on subprocess failure
-
-For other statusline plugins, call `require("metermeter").statusline()` from your config.
+If lualine is installed, MeterMeter automatically adds itself to `lualine_x` — no configuration needed. It shows the dominant meter when active (`MM: iambic pentameter`), `MM: …` while scanning, or an error summary on failure.
 
 ## File Enable Rules
 
