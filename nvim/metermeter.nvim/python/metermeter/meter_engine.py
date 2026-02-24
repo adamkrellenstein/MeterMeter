@@ -15,6 +15,8 @@ UNSTRESSED_MONOSYLLABLES = frozenset({
     "at", "by", "for", "from", "in", "of", "on", "per", "to", "with",
     # Conjunctions
     "and", "but", "or", "nor", "if", "as", "than", "so", "yet",
+    # Contractions / particles that prosodic marks stressed but behave as clitics
+    "twas", "tis",
     # Auxiliary / modal verbs
     "am", "are", "be", "been", "can", "could", "did", "do", "does",
     "had", "has", "have", "is", "may", "might", "must", "shall",
@@ -31,13 +33,21 @@ UNSTRESSED_MONOSYLLABLES = frozenset({
 # These are either wrongly marked unstressed by prosodic/CMU Dict, or were
 # incorrectly included in UNSTRESSED_MONOSYLLABLES.
 STRESSED_MONOSYLLABLES = frozenset({
+    # These words are predominantly stressed in the 4B4V corpus but
+    # are marked unstressed by prosodic/CMU Dict, or were in UNSTRESSED_MONOSYLLABLES.
     "all",   # 96% S
-    "here",  # 100% S (prosodic marks unstressed)
+    "round", # 100% S
+    "here",  # 100% S
+    "own",   # 100% S
     "each",  # 89% S
-    "off",   # 80% S
     "there", # 83% S
+    "off",   # 80% S
+    "down",  # 92% S
     "up",    # 77% S
     "such",  # 73% S
+    "out",   # 76% S
+    "more",  # 75% S
+    "one",   # 79% S
     "what",  # 56% S
     "not",   # 55% S
 })
