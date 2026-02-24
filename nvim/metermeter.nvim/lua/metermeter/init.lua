@@ -422,7 +422,7 @@ local function maybe_apply_results(bufnr, results)
   st.last_render_sig = sig
   st.debug_apply_count = (tonumber(st.debug_apply_count) or 0) + 1
   apply_results(bufnr, results)
-  vim.cmd("redrawstatus")
+  vim.cmd("redrawstatus!")
 end
 
 local function build_request(bufnr, ordered_lines)
@@ -679,6 +679,7 @@ function M.enable(bufnr)
   st.enabled = true
   st.last_changedtick = -1
   st.last_view_sig = ""
+  vim.cmd("redrawstatus!")
   ensure_tick(bufnr)
   schedule_scan(bufnr)
 end
@@ -690,6 +691,7 @@ function M.disable(bufnr)
   state_mod.stop_scan_state(st)
   _cleanup_timers(st)
   clear_buf(bufnr)
+  vim.cmd("redrawstatus!")
 end
 
 function M.toggle(bufnr)
