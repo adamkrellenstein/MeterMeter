@@ -95,6 +95,7 @@ def compile_report(results: Dict[int, LineResult]) -> Dict[str, object]:
 
     meter_correct = sum(1 for r in results.values() if r.meter_correct)
     stress_accs = [r.stress_accuracy for r in results.values()]
+    stress_exact = sum(1 for r in results.values() if r.baseline_stress and r.baseline_stress == r.line.gold_stress)
 
     # Stress F1 (aggregate)
     all_stress = "".join(r.baseline_stress for r in results.values())
@@ -151,6 +152,7 @@ def compile_report(results: Dict[int, LineResult]) -> Dict[str, object]:
         "total_lines": total,
         "meter_accuracy": round(meter_correct / total, 4),
         "stress_accuracy_mean": round(sum(stress_accs) / len(stress_accs), 4) if stress_accs else 0.0,
+        "stress_exact_line_match_rate": round(stress_exact / total, 4),
         "stress_f1": {k: round(v, 4) if isinstance(v, float) else v for k, v in stress_f1.items()},
         "confusion_matrix": confusion,
         "by_meter": by_meter,

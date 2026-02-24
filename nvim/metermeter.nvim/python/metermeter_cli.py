@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json
 import sys
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from metermeter.meter_engine import MeterEngine
 
@@ -14,9 +14,32 @@ def _char_to_byte_index(text: str, char_idx: int) -> int:
     return len(text[:char_idx].encode("utf-8"))
 
 
-def _stress_spans_from_syllables(text: str, syllable_positions: List[Tuple[str, bool]]) -> List[List[int]]:
-    """Compute byte-level stress spans by matching prosodic syllable texts against the line."""
+def _stress_spans_from_syllables(
+    text: str,
+    syllable_positions: List[Tuple[str, bool]],
+    syllable_char_spans: Optional[List[Tuple[int, int]]] = None,
+) -> List[List[int]]:
+    """Compute byte-level stress spans from char spans, with substring fallback."""
     spans: List[List[int]] = []
+    text_len = len(text)
+    if (
+        isinstance(syllable_char_spans, list)
+        and len(syllable_char_spans) == len(syllable_positions)
+    ):
+        for (span_start, span_end), (_, is_strong) in zip(syllable_char_spans, syllable_positions):
+            if not is_strong:
+                continue
+            start = max(0, min(text_len, int(span_start)))
+            end = max(0, min(text_len, int(span_end)))
+            if end <= start:
+                continue
+            b_s = _char_to_byte_index(text, start)
+            b_e = _char_to_byte_index(text, end)
+            if b_e > b_s:
+                spans.append([b_s, b_e])
+        return spans
+
+    # Backward-compatible fallback.
     cursor = 0
     text_lower = text.lower()
     for syl_txt, is_strong in syllable_positions:
@@ -36,15 +59,19 @@ def _stress_spans_from_syllables(text: str, syllable_positions: List[Tuple[str, 
     return spans
 
 
-def _analyze_line(engine: MeterEngine, item: dict) -> dict | None:
+def _analyze_line(engine: MeterEngine, item: dict, context: Optional[Dict[str, Any]] = None) -> dict | None:
     lnum = item.get("lnum")
     text = item.get("text")
     if not isinstance(lnum, int) or not isinstance(text, str):
         return None
-    a = engine.analyze_line(text, line_no=lnum)
+    a = engine.analyze_line(text, line_no=lnum, context=context)
     if a is None:
         return None
-    spans = _stress_spans_from_syllables(a.source_text, a.syllable_positions)
+    spans = _stress_spans_from_syllables(
+        a.source_text,
+        a.syllable_positions,
+        getattr(a, "syllable_char_spans", None),
+    )
     return {
         "lnum": int(a.line_no),
         "text": a.source_text,
@@ -71,6 +98,9 @@ def run_persistent() -> int:
             break
 
         req_id = req.get("id")
+        context = req.get("context")
+        if not isinstance(context, dict):
+            context = None
         items = [
             item for item in (req.get("lines") or [])
             if isinstance(item, dict)
@@ -78,7 +108,7 @@ def run_persistent() -> int:
             and isinstance(item.get("text"), str)
         ]
 
-        results = [r for item in items for r in [_analyze_line(engine, item)] if r is not None]
+        results = [r for item in items for r in [_analyze_line(engine, item, context=context)] if r is not None]
 
         payload = {
             "id": req_id,
@@ -98,6 +128,9 @@ def main() -> int:
         return 0
     req = json.loads(raw)
     lines = req.get("lines") or []
+    context = req.get("context")
+    if not isinstance(context, dict):
+        context = None
 
     engine = MeterEngine()
     results = []
@@ -108,10 +141,14 @@ def main() -> int:
         text = item.get("text")
         if not isinstance(lnum, int) or not isinstance(text, str):
             continue
-        a = engine.analyze_line(text, line_no=lnum)
+        a = engine.analyze_line(text, line_no=lnum, context=context)
         if a is None:
             continue
-        spans = _stress_spans_from_syllables(a.source_text, a.syllable_positions)
+        spans = _stress_spans_from_syllables(
+            a.source_text,
+            a.syllable_positions,
+            getattr(a, "syllable_char_spans", None),
+        )
         results.append({
             "lnum": int(a.line_no),
             "text": a.source_text,

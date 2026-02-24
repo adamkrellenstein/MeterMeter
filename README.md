@@ -8,7 +8,7 @@ Scanning is progressive and incremental: visible lines are annotated first, near
 
 ## Architecture
 
-Two layers:
+Three layers:
 
 **Neovim runtime** (`nvim/metermeter.nvim/lua/metermeter/`)
 - Determines which lines are scannable (ignores native comment lines).
@@ -20,22 +20,29 @@ Two layers:
 
 **Python subprocess** (`nvim/metermeter.nvim/python/metermeter_cli.py`)
 - Communicates with Neovim via newline-delimited JSON over stdin/stdout.
-- Uses a `ProcessPoolExecutor` (sized to half the CPU count by default) to analyze lines in parallel.
-- Each pool worker holds a pre-initialized `MeterEngine`, avoiding repeated prosodic import overhead.
+- Runs as a single persistent process (no worker pool) to keep startup and per-request overhead low.
+- Accepts optional per-request context (`dominant_meter`, `dominant_strength`) from Neovim as a soft prior.
 
 **Python analysis** (`nvim/metermeter.nvim/python/metermeter/`)
-- `meter_engine.py`: uses prosodic's pronunciation layer (CMU Dict + eSpeak fallback) for lexical stress, with a function-word lookup table for monosyllable disambiguation. Meter is classified by template matching against the resulting stress pattern. Produces a `LineAnalysis` with per-syllable stress positions, per-token patterns, meter name, foot count, and confidence.
+- `meter_engine.py`: uses prosodic's pronunciation layer (CMU Dict + eSpeak fallback) for lexical stress, builds ambiguity-aware syllable options, resolves stress with meter-aware Viterbi scoring, and outputs meter/confidence plus robust per-syllable char spans for highlighting.
 
 ### Pipeline
 
 ```
 line text
   -> prosodic (pronunciation)  -> syllables + lexical stress
-  -> monosyllable rules        -> S/U stress pattern
-  -> template matching         -> meter_name, confidence
-  -> stress span computation   -> byte-level stress spans
+  -> soft lexical priors       -> ambiguous S/U options
+  -> Viterbi + meter scoring   -> best stress pattern + meter_name + confidence
+  -> char-span mapping         -> byte-level stress spans
   -> Neovim extmarks
 ```
+
+## What MeterMeter Predicts
+
+- Per-line meter class (`iambic|trochaic|anapestic|dactylic` + line length label).
+- Per-syllable binary stress pattern (`S`/`U`) used for highlighting and scoring.
+
+MeterMeter does not currently attempt full scholarly scansion markup (e.g. explicit substitution labels, caesura, synalepha/elision taxonomy, or poem-level global parsing).
 
 ## Comparison with other English scansion systems
 
@@ -46,17 +53,40 @@ The only widely-used English gold standard is [For Better For Verse](https://git
 | Scandroid (Hartman) | Dict + rules → stress → feet | ~90% | -- |
 | ZeuScansion (Agirrezabal 2016) | Dict + POS + Groves rules → stress → template | 86.78% | -- |
 | BiLSTM-CRF (Agirrezabal 2017) | Neural sequence labeling | 92.96% | 61.39% |
-| **MeterMeter** | **Dict + function-word rules → stress → template** | **~87%** | **~74%** |
+| **MeterMeter** | **Dict + function-word priors + meter-aware Viterbi** | **~87.7%** | **~77.2%** |
 
-Per-syllable accuracy is naturally high because most syllables are unambiguous; per-line is strict because a single wrong stress fails the whole line. The main error source for all systems is context-dependent monosyllable stress (e.g. "hath", "all", "too"), which requires poem-level context to resolve.
+Per-syllable agreement is naturally high because most syllables are lexically stable. Meter-class accuracy is stricter than token-level agreement but is still a different metric from exact whole-line stress-string match.
+The current MeterMeter values above come from `benchmarks/run_benchmark.py` on the full local 4B4V corpus (1,181 lines) as measured on February 24, 2026.
+
+### Metrics and comparability
+
+- MeterMeter numbers in this repo come from local tests/benchmarks against parsed 4B4V labels.
+- "Per-syllable" means U/S agreement against 4B4V stress strings.
+- "Per-line" in this README means meter-class agreement (`"iambic pentameter"` style label equality).
+- This is not the same as strict per-line stress exact match; benchmark output now reports that separately (`stress_exact_line_match_rate`).
+- Published numbers from other systems can differ in splits, normalization, and metric definitions, so table values are best treated as directional.
 
 ### How scansion engines differ
 
-Every system that scores well on per-syllable accuracy uses the same fundamental approach: **stress first, meter second**. Dictionary lookup determines stress for polysyllabic words (~100% correct), a function-word rule handles monosyllables (~80-85% correct), and meter is classified from the resulting pattern. The BiLSTM-CRF learns these mappings jointly from data instead of using hand-crafted rules.
+Every system that scores well on per-syllable accuracy uses the same fundamental approach: **stress first, meter second**. Dictionary lookup determines stress for polysyllabic words, monosyllable handling is the hard part, and meter is classified from the resulting pattern. The BiLSTM-CRF learns these mappings jointly from data instead of using hand-crafted rules.
 
 MeterMeter previously used prosodic's OT metrical parser, which works in the opposite direction: it picks the best *metrical grid* for the line and reads stress off the grid positions. This was linguistically principled but fragile -- when the parser picked the wrong template (e.g. trochaic instead of iambic), every syllable flipped, producing ~66% per-syllable accuracy. Switching to lexical stress lookup with monosyllable rules brought per-syllable accuracy to ~85% and made the engine ~80x faster (the OT parse was the bottleneck).
 
-The remaining gap to the BiLSTM-CRF (~93%) is mostly context-dependent monosyllable stress: function words in strong metrical positions (e.g. "to" in "thee TO a summer's day") that our rule marks as unstressed but the gold standard marks as stressed. Closing this gap would require either a trained sequence model or poem-level context awareness.
+The remaining gap to high-performing learned systems is mostly context-dependent monosyllable stress: function words in strong metrical positions (e.g. "to" in "thee TO a summer's day") and local ambiguity that needs line context and weak poem-level priors.
+
+### Why monosyllables are hard
+
+- Lexical stress and metrical prominence do not always align on function words.
+- The same token can flip based on local metrical slot and rhetorical emphasis.
+- Fixed word lists are useful priors, but hard rules mis-handle legitimate inversions.
+- MeterMeter addresses this with soft priors and Viterbi decoding over candidate stress assignments.
+
+### Design tradeoffs
+
+- Real-time editor feedback favors deterministic, low-latency scoring over heavy global models.
+- A single persistent Python process keeps response latency stable in Neovim.
+- Context is used as a soft prior (`dominant_meter` + strength), never a hard lock.
+- The engine is intentionally interpretable: debug scores and top meter candidates are exposed.
 
 ## Requirements
 
@@ -141,7 +171,7 @@ require("metermeter").setup({ ... })
 | `ui.meter_hints` | `true` | Show meter label at end of line. |
 | `ui.meter_hint_confidence_levels` | `6` | Number of confidence tint steps (range 2-12). |
 | `cache.max_entries` | `5000` | Per-buffer LRU cache capacity. |
-| `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path for `:MeterMeterDump`. |
+| `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path for `:MeterMeterDebug`. |
 
 ### Global variable
 
@@ -173,7 +203,7 @@ uv run python benchmarks/run_benchmark.py --progress
 **Neovim smoke test** (requires `nvim` on PATH):
 
 ```bash
-./scripts/run_smoke_tests.sh
+./scripts/run_tests.sh
 ```
 
 ## Subprocess JSON Protocol
@@ -182,7 +212,7 @@ The Neovim layer communicates with the Python subprocess via newline-delimited J
 
 **Request (Lua → Python):**
 ```json
-{"id": 1, "lines": [{"lnum": 0, "text": "Shall I compare thee to a summer's day?"}]}
+{"id": 1, "lines": [{"lnum": 0, "text": "Shall I compare thee to a summer's day?"}], "context": {"dominant_meter": "iambic pentameter", "dominant_strength": 0.7}}
 ```
 
 **Response (Python → Lua):**
@@ -195,5 +225,5 @@ The `id` is echoed in the response so Lua can match responses to callbacks (requ
 ## Troubleshooting
 
 - No annotations appear: check that `&filetype` includes `metermeter` and that the statusline shows `MM: …` or a meter name.
-- Unexpected highlights: run `:MeterMeterDump` and inspect the JSON at `debug_dump_path`.
+- Unexpected highlights: run `:MeterMeterDebug` and inspect the JSON at `debug_dump_path`.
 - `espeak` warnings from prosodic: install espeak (`brew install espeak` / `apt install espeak`). Without it, OOV words fall back to a neural heuristic which may be slower or less accurate.

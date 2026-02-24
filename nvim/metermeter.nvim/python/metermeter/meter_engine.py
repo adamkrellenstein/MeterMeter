@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import prosodic
 
@@ -38,11 +38,11 @@ STRESSED_MONOSYLLABLES = frozenset({
     # These words are predominantly stressed in the 4B4V corpus but
     # are marked unstressed by prosodic/CMU Dict, or were in UNSTRESSED_MONOSYLLABLES.
     "all",   # 96% S
-    "round", # 100% S
+    "round",  # 100% S
     "here",  # 100% S
     "own",   # 100% S
     "each",  # 89% S
-    "there", # 83% S
+    "there",  # 83% S
     "off",   # 80% S
     "down",  # 92% S
     "up",    # 77% S
@@ -76,7 +76,7 @@ LINE_NAME_BY_FEET = {
     6: "hexameter",
 }
 
-# -- Pattern distance scoring --
+# Pattern scoring constants for deterministic API compatibility.
 BINARY_FIRST_POS_DISCOUNT = 0.5
 LENGTH_MISMATCH_COST = 0.85
 FEMININE_ENDING_COST = 0.30
@@ -92,6 +92,13 @@ TROCHAIC_FIRST_FOOT_PENALTY = 0.18
 TROCHAIC_SPONDEE_PENALTY = 0.38
 TROCHAIC_WEAK_STRONG_PENALTY = 0.54
 
+# Ambiguity / context priors.
+MONO_FLIP_COST = 1.30
+POLY_FLIP_COST = 1.75
+FUNCTION_TO_STRONG_FLIP_COST = 0.85
+STRONG_TO_WEAK_FLIP_COST = 1.05
+CONTEXT_PRIOR_MAX_BONUS = 0.12
+
 
 @dataclass
 class LineAnalysis:
@@ -106,7 +113,29 @@ class LineAnalysis:
     token_patterns: List[str] = field(default_factory=list)
     # Flat per-syllable (text, is_strong) pairs from prosodic, used for highlighting.
     syllable_positions: List[Tuple[str, bool]] = field(default_factory=list)
+    # Flat per-syllable char spans in source_text.
+    syllable_char_spans: List[Tuple[int, int]] = field(default_factory=list)
 
+
+@dataclass
+class _SyllableUnit:
+    text: str
+    token_index: int
+    char_start: int
+    char_end: int
+    options: Tuple[Tuple[str, float], ...]
+    default_stress: str
+
+
+@dataclass
+class _MeterPath:
+    foot_name: str
+    feet: int
+    base_score: float
+    adjusted_score: float
+    cost: float
+    pattern: str
+    context_bonus: float
 
 
 class MeterEngine:
@@ -116,7 +145,7 @@ class MeterEngine:
     def tokenize(self, line: str) -> List[str]:
         return TOKEN_RE.findall(line)
 
-    # -- Template-matching helpers --
+    # -- Deterministic scoring helpers (API compatibility) --
 
     def _parse_meter_name(self, meter_name: str) -> Optional[Tuple[str, int]]:
         m = METER_NAME_RE.match((meter_name or "").strip().lower())
@@ -187,19 +216,24 @@ class MeterEngine:
         dist += self._foot_position_penalty(pattern, foot_name, feet)
         normalizer = max(len(pattern), len(template), 1)
         score = max(0.0, 1.0 - (dist / normalizer))
-        if 9 <= len(pattern) <= 11:
-            if foot_name == "iambic" and feet == 5:
-                score += IAMBIC_PENTAMETER_BONUS
-            elif foot_name == "trochaic" and feet == 5:
-                score += TROCHAIC_PENTAMETER_BONUS
-            elif foot_name in {"anapestic", "dactylic"}:
-                score -= TERNARY_METER_PENALTY
-        if 12 <= len(pattern) <= 13:
-            if foot_name == "iambic" and feet == 6:
-                score += IAMBIC_HEXAMETER_BONUS
-            elif foot_name in {"anapestic", "dactylic"}:
-                score -= TERNARY_METER_PENALTY
+        score = self._apply_meter_length_priors(score, foot_name, feet, len(pattern))
         return max(0.0, min(1.0, score))
+
+    def _apply_meter_length_priors(self, score: float, foot_name: str, feet: int, pattern_len: int) -> float:
+        out = score
+        if 9 <= pattern_len <= 11:
+            if foot_name == "iambic" and feet == 5:
+                out += IAMBIC_PENTAMETER_BONUS
+            elif foot_name == "trochaic" and feet == 5:
+                out += TROCHAIC_PENTAMETER_BONUS
+            elif foot_name in {"anapestic", "dactylic"}:
+                out -= TERNARY_METER_PENALTY
+        if 12 <= pattern_len <= 13:
+            if foot_name == "iambic" and feet == 6:
+                out += IAMBIC_HEXAMETER_BONUS
+            elif foot_name in {"anapestic", "dactylic"}:
+                out -= TERNARY_METER_PENALTY
+        return max(0.0, min(1.0, out))
 
     def _meter_candidates(self, pattern: str) -> List[Tuple[str, int, float]]:
         if not pattern:
@@ -270,10 +304,271 @@ class MeterEngine:
             debug[f"top{i}_{name}_{feet}"] = score
         return meter_name_out, best_score, debug
 
-    def analyze_line(self, line: str, line_no: int = 0) -> Optional[LineAnalysis]:
+    # -- Viterbi disambiguation helpers --
+
+    def _coerce_context(self, context: Optional[Dict[str, Any]]) -> Tuple[str, float]:
+        if not isinstance(context, dict):
+            return "", 0.0
+        meter = str(context.get("dominant_meter") or "").strip().lower()
+        strength = context.get("dominant_strength")
+        if not isinstance(strength, (int, float)):
+            strength = 0.0
+        strength_f = max(0.0, min(1.0, float(strength)))
+        if meter == "":
+            return "", 0.0
+        if self._parse_meter_name(meter) is None:
+            return "", 0.0
+        return meter, strength_f
+
+    def _options_for_syllable(self, word_text: str, is_monosyllable: bool, lexical_stressed: bool) -> Tuple[Tuple[str, float], ...]:
+        if is_monosyllable and word_text in UNSTRESSED_MONOSYLLABLES:
+            return (("U", 0.0), ("S", FUNCTION_TO_STRONG_FLIP_COST))
+        if is_monosyllable and word_text in STRESSED_MONOSYLLABLES:
+            return (("S", 0.0), ("U", STRONG_TO_WEAK_FLIP_COST))
+        if lexical_stressed:
+            flip = MONO_FLIP_COST if is_monosyllable else POLY_FLIP_COST
+            return (("S", 0.0), ("U", flip))
+        flip = MONO_FLIP_COST if is_monosyllable else POLY_FLIP_COST
+        return (("U", 0.0), ("S", flip))
+
+    def _position_mismatch_extra(self, foot_name: str, template_idx: int) -> float:
+        if foot_name not in {"iambic", "trochaic"}:
+            return 0.0
+        foot_idx = template_idx // 2
+        in_foot_pos = template_idx % 2
+        if foot_name == "iambic":
+            if foot_idx == 0:
+                return IAMBIC_FIRST_FOOT_PENALTY
+            if in_foot_pos == 0:
+                return IAMBIC_SPONDEE_PENALTY
+            return IAMBIC_WEAK_STRONG_PENALTY
+        if foot_idx == 0:
+            return TROCHAIC_FIRST_FOOT_PENALTY
+        if in_foot_pos == 0:
+            return TROCHAIC_SPONDEE_PENALTY
+        return TROCHAIC_WEAK_STRONG_PENALTY
+
+    def _mismatch_cost_at(self, foot_name: str, template_idx: int) -> float:
+        base = 1.0
+        if template_idx == 0 and foot_name in {"iambic", "trochaic"}:
+            base = BINARY_FIRST_POS_DISCOUNT
+        return base + self._position_mismatch_extra(foot_name, template_idx)
+
+    def _candidate_meters_for_syllables(self, syllable_count: int) -> List[Tuple[str, int]]:
+        out: List[Tuple[str, int]] = []
+        for foot_name, unit_pattern in FOOT_TEMPLATES.items():
+            unit = len(unit_pattern)
+            approx_feet = max(1, int(round(syllable_count / float(unit))))
+            for feet in range(max(1, approx_feet - 1), min(6, approx_feet + 1) + 1):
+                out.append((foot_name, feet))
+        return out
+
+    def _viterbi_for_meter(self, syllables: List[_SyllableUnit], foot_name: str, feet: int) -> Tuple[str, float]:
+        template = self._template_for_meter(foot_name, feet)
+        n = len(syllables)
+        m = len(template)
+        inf = 1e12
+
+        dp: List[List[float]] = [[inf] * (m + 1) for _ in range(n + 1)]
+        prev: List[List[Optional[Tuple[int, int, str, str]]]] = [[None] * (m + 1) for _ in range(n + 1)]
+        dp[0][0] = 0.0
+
+        for i in range(n + 1):
+            for j in range(m + 1):
+                cur = dp[i][j]
+                if cur >= inf:
+                    continue
+
+                if i < n and j < m:
+                    unit = syllables[i]
+                    expected = template[j]
+                    for stress, opt_cost in unit.options:
+                        mismatch_cost = 0.0 if stress == expected else self._mismatch_cost_at(foot_name, j)
+                        new_cost = cur + opt_cost + mismatch_cost
+                        if new_cost < dp[i + 1][j + 1]:
+                            dp[i + 1][j + 1] = new_cost
+                            prev[i + 1][j + 1] = (i, j, "M", stress)
+
+                if i < n:
+                    unit = syllables[i]
+                    delete_stress, delete_opt_cost = min(unit.options, key=lambda option: (option[1], option[0]))
+                    delete_penalty = LENGTH_MISMATCH_COST
+                    if j == m and i == n - 1 and delete_stress == "U":
+                        delete_penalty = FEMININE_ENDING_COST
+                    new_cost = cur + delete_opt_cost + delete_penalty
+                    if new_cost < dp[i + 1][j]:
+                        dp[i + 1][j] = new_cost
+                        prev[i + 1][j] = (i, j, "D", delete_stress)
+
+                if j < m:
+                    new_cost = cur + LENGTH_MISMATCH_COST
+                    if new_cost < dp[i][j + 1]:
+                        dp[i][j + 1] = new_cost
+                        prev[i][j + 1] = (i, j, "I", "")
+
+        final_cost = dp[n][m]
+        if final_cost >= inf:
+            fallback = "".join(unit.default_stress for unit in syllables)
+            return fallback, float("inf")
+
+        pattern_rev: List[str] = []
+        i = n
+        j = m
+        while i > 0 or j > 0:
+            state = prev[i][j]
+            if state is None:
+                break
+            pi, pj, action, stress = state
+            if action in {"M", "D"}:
+                pattern_rev.append(stress)
+            i, j = pi, pj
+        pattern = "".join(reversed(pattern_rev))
+        if len(pattern) != n:
+            pattern = "".join(unit.default_stress for unit in syllables)
+
+        return pattern, final_cost
+
+    def _best_meter_for_ambiguous_syllables(
+        self,
+        syllables: List[_SyllableUnit],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, float, Dict[str, float], str]:
+        if not syllables:
+            return "", 0.0, {"margin": 0.0}, ""
+
+        context_meter, context_strength = self._coerce_context(context)
+        context_bonus_max = CONTEXT_PRIOR_MAX_BONUS * context_strength
+        n_syllables = len(syllables)
+        lexical_pattern = "".join(unit.default_stress for unit in syllables)
+        meter_paths: List[_MeterPath] = []
+
+        for foot_name, feet in self._candidate_meters_for_syllables(n_syllables):
+            pattern, cost = self._viterbi_for_meter(syllables, foot_name, feet)
+            if not pattern:
+                continue
+            template = self._template_for_meter(foot_name, feet)
+            normalizer = max(len(pattern), len(template), 1)
+            viterbi_score = max(0.0, 1.0 - (cost / normalizer))
+            viterbi_score = self._apply_meter_length_priors(viterbi_score, foot_name, feet, len(pattern))
+            lexical_score = self._score_pattern_for_meter(lexical_pattern, foot_name, feet)
+            base_score = (0.50 * viterbi_score) + (0.50 * lexical_score)
+            line_name = LINE_NAME_BY_FEET.get(feet, f"{feet}-foot")
+            meter_name = f"{foot_name} {line_name}"
+            context_bonus = context_bonus_max if meter_name == context_meter else 0.0
+            adjusted_score = max(0.0, min(1.0, base_score + context_bonus))
+            meter_paths.append(_MeterPath(
+                foot_name=foot_name,
+                feet=feet,
+                base_score=base_score,
+                adjusted_score=adjusted_score,
+                cost=cost,
+                pattern=pattern,
+                context_bonus=context_bonus,
+            ))
+
+        if not meter_paths:
+            fallback = "".join(unit.default_stress for unit in syllables)
+            return "", 0.0, {"margin": 0.0}, fallback
+
+        meter_paths.sort(key=lambda item: item.adjusted_score, reverse=True)
+        best = meter_paths[0]
+
+        iambic_bias = False
+        iambic_bias_target = None
+        if 9 <= n_syllables <= 11:
+            iambic_bias_target = 5
+        elif 12 <= n_syllables <= 13:
+            iambic_bias_target = 6
+        if iambic_bias_target is not None:
+            for candidate in meter_paths:
+                if candidate.foot_name == "iambic" and candidate.feet == iambic_bias_target:
+                    if best != candidate and candidate.adjusted_score >= (best.adjusted_score - IAMBIC_BIAS_THRESHOLD):
+                        best = candidate
+                        iambic_bias = True
+                    break
+
+        second_score = 0.0
+        for candidate in meter_paths:
+            if candidate.foot_name == best.foot_name and candidate.feet == best.feet:
+                continue
+            if candidate.adjusted_score > second_score:
+                second_score = candidate.adjusted_score
+
+        margin = max(0.0, best.adjusted_score - second_score)
+        line_name = LINE_NAME_BY_FEET.get(best.feet, f"{best.feet}-foot")
+        meter_name_out = f"{best.foot_name} {line_name}"
+        debug: Dict[str, float] = {
+            "margin": margin,
+            "second_score": second_score,
+            "iambic_bias": float(iambic_bias),
+            "context_strength": context_strength,
+            "context_bonus": best.context_bonus,
+        }
+        for idx, candidate in enumerate(meter_paths[:4], start=1):
+            debug[f"top{idx}_{candidate.foot_name}_{candidate.feet}"] = candidate.adjusted_score
+            debug[f"top{idx}_{candidate.foot_name}_{candidate.feet}_base"] = candidate.base_score
+        return meter_name_out, best.adjusted_score, debug, best.pattern
+
+    def _align_syllables_in_token(
+        self,
+        line: str,
+        token_start: int,
+        token_end: int,
+        syllable_texts: List[str],
+    ) -> List[Tuple[int, int]]:
+        token = line[token_start:token_end]
+        token_lower = token.lower()
+        local_cursor = 0
+        out: List[Tuple[int, int]] = []
+        exact = True
+
+        for raw_text in syllable_texts:
+            s = (raw_text or "").lower()
+            if not s:
+                exact = False
+                out.append((token_start + local_cursor, token_start + local_cursor))
+                continue
+            idx = token_lower.find(s, local_cursor)
+            if idx == -1:
+                exact = False
+                out.append((token_start + local_cursor, token_start + local_cursor))
+                continue
+            start = token_start + idx
+            end = token_start + idx + len(s)
+            out.append((start, end))
+            local_cursor = idx + len(s)
+
+        if exact:
+            return out
+
+        token_len = max(1, token_end - token_start)
+        widths = [max(1, len((text or "").strip())) for text in syllable_texts]
+        total_width = max(1, sum(widths))
+        rebuilt: List[Tuple[int, int]] = []
+        accum = 0
+        for idx, width in enumerate(widths):
+            start = token_start + int(round((accum / float(total_width)) * token_len))
+            accum += width
+            end = token_start + int(round((accum / float(total_width)) * token_len))
+            if idx == len(widths) - 1:
+                end = token_end
+            if end <= start:
+                end = min(token_end, start + 1)
+            rebuilt.append((start, end))
+        return rebuilt
+
+    def analyze_line(
+        self,
+        line: str,
+        line_no: int = 0,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[LineAnalysis]:
         if not line.strip():
             return None
-        tokens = self.tokenize(line)
+
+        token_matches = list(TOKEN_RE.finditer(line))
+        tokens = [m.group(0) for m in token_matches]
+        token_spans = [(m.start(), m.end()) for m in token_matches]
         if not tokens:
             return None
 
@@ -285,11 +580,10 @@ class MeterEngine:
         except Exception:
             return None
 
-        # Build stress from lexical pronunciation (CMU Dict / eSpeak),
-        # not from the OT metrical parse.  Monosyllabic function words
-        # are forced unstressed following Groves' rules.
-        syllable_positions: List[Tuple[str, bool]] = []
+        syllables: List[_SyllableUnit] = []
         token_patterns: List[str] = []
+        token_cursor = 0
+        line_char_len = len(line)
 
         for wt in pline.wordtokens:
             wtype = wt.wordtype
@@ -300,40 +594,76 @@ class MeterEngine:
             if not syls:
                 continue
 
-            word_text = wt.txt.strip().lower().strip("'")
-            is_mono = len(syls) == 1
-            pat = ""
-            for syl in syls:
-                if is_mono and word_text in UNSTRESSED_MONOSYLLABLES:
-                    stressed = False
-                elif is_mono and word_text in STRESSED_MONOSYLLABLES:
-                    stressed = True
-                else:
-                    stressed = getattr(syl, "is_stressed", False)
-                syllable_positions.append((syl.txt.lower(), stressed))
-                pat += "S" if stressed else "U"
-            token_patterns.append(pat)
+            token_index = min(token_cursor, max(0, len(tokens) - 1))
+            if token_cursor < len(token_spans):
+                token_start, token_end = token_spans[token_cursor]
+                token_text = line[token_start:token_end]
+                token_cursor += 1
+            else:
+                raw_word = str(getattr(wt, "txt", "") or "")
+                raw_word_l = raw_word.lower().strip()
+                token_start = max(0, min(line_char_len, line.lower().find(raw_word_l)))
+                token_end = max(token_start + 1, min(line_char_len, token_start + max(1, len(raw_word_l))))
+                token_text = line[token_start:token_end]
 
-        if not syllable_positions:
+            word_text = token_text.strip().lower().strip("'")
+            is_mono = len(syls) == 1
+            syllable_texts = [str(getattr(syl, "txt", "") or "").lower() for syl in syls]
+            syllable_spans = self._align_syllables_in_token(line, token_start, token_end, syllable_texts)
+
+            token_pattern_default = ""
+            for syl, syl_text, (span_start, span_end) in zip(syls, syllable_texts, syllable_spans):
+                lexical_stressed = bool(getattr(syl, "is_stressed", False))
+                options = self._options_for_syllable(word_text, is_mono, lexical_stressed)
+                default_stress = min(options, key=lambda option: (option[1], option[0]))[0]
+                token_pattern_default += default_stress
+                syllables.append(_SyllableUnit(
+                    text=syl_text,
+                    token_index=token_index,
+                    char_start=max(0, min(line_char_len, span_start)),
+                    char_end=max(0, min(line_char_len, span_end)),
+                    options=options,
+                    default_stress=default_stress,
+                ))
+            token_patterns.append(token_pattern_default or "U")
+
+        if not syllables:
             return None
 
-        # If prosodic gave a different word count than TOKEN_RE, align to TOKEN_RE.
-        if len(token_patterns) != len(tokens):
-            all_syls_flat = syllable_positions
-            token_patterns = []
-            n_tokens = len(tokens)
-            n_pos = len(all_syls_flat)
-            for i in range(n_tokens):
-                start = (i * n_pos) // n_tokens
-                end = ((i + 1) * n_pos) // n_tokens
-                if end <= start:
-                    end = min(n_pos, start + 1)
-                pat = "".join("S" if all_syls_flat[j][1] else "U" for j in range(start, end))
-                token_patterns.append(pat or "U")
+        meter_name, best_score, debug_scores, resolved_pattern = self._best_meter_for_ambiguous_syllables(
+            syllables,
+            context=context,
+        )
+        if len(resolved_pattern) != len(syllables):
+            resolved_pattern = "".join(unit.default_stress for unit in syllables)
 
-        stress_pattern = "".join(token_patterns)
+        context_bonus = float(debug_scores.get("context_bonus") or 0.0)
+        output_pattern_chars: List[str] = []
+        for idx, unit in enumerate(syllables):
+            chosen = resolved_pattern[idx]
+            if chosen != unit.default_stress:
+                option_costs = {stress: cost for stress, cost in unit.options}
+                flip_cost = float(option_costs.get(chosen, POLY_FLIP_COST))
+                # Keep meter-aware flips mostly for low-cost ambiguity (typically monosyllables).
+                # For high-cost flips, fall back to lexical default unless context prior is strong.
+                if flip_cost >= 1.0 and context_bonus < 0.08:
+                    chosen = unit.default_stress
+            output_pattern_chars.append(chosen)
+        output_pattern = "".join(output_pattern_chars)
 
-        meter_name, best_score, debug_scores = self.best_meter_for_stress_pattern(stress_pattern)
+        syllable_positions: List[Tuple[str, bool]] = []
+        syllable_char_spans: List[Tuple[int, int]] = []
+        token_patterns_resolved: List[str] = ["" for _ in token_patterns]
+        for idx, unit in enumerate(syllables):
+            stressed = output_pattern[idx] == "S"
+            syllable_positions.append((unit.text, stressed))
+            syllable_char_spans.append((unit.char_start, unit.char_end))
+            if 0 <= unit.token_index < len(token_patterns_resolved):
+                token_patterns_resolved[unit.token_index] += output_pattern[idx]
+
+        token_patterns_out = [pat or "U" for pat in token_patterns_resolved]
+        stress_pattern = "".join(token_patterns_out)
+
         parsed = self._parse_meter_name(meter_name)
         feet_count = parsed[1] if parsed else max(1, round(len(stress_pattern) / 2))
         confidence = max(0.0, min(1.0, best_score))
@@ -347,6 +677,7 @@ class MeterEngine:
             feet_count=feet_count,
             confidence=confidence,
             debug_scores=debug_scores,
-            token_patterns=token_patterns,
+            token_patterns=token_patterns_out,
             syllable_positions=syllable_positions,
+            syllable_char_spans=syllable_char_spans,
         )

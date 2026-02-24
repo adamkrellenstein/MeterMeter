@@ -449,7 +449,17 @@ local function build_request(bufnr, ordered_lines)
     end
   end
 
-  return { lines = lines }
+  local req = { lines = lines }
+  local dominant_meter = tostring(st.dominant_meter or "")
+  local dominant_strength = tonumber(st.dominant_strength) or 0
+  dominant_strength = math.max(0, math.min(1, dominant_strength))
+  if dominant_meter ~= "" and dominant_strength > 0 then
+    req.context = {
+      dominant_meter = dominant_meter,
+      dominant_strength = dominant_strength,
+    }
+  end
+  return req
 end
 
 local function merge_cache_and_results(bufnr, resp, ordered_lines)
@@ -519,6 +529,11 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines)
     end
   end
   st.dominant_meter = best_meter
+  if total > 0 then
+    st.dominant_strength = best_weight / total
+  else
+    st.dominant_strength = 0
+  end
 
   return out
 end
@@ -787,6 +802,7 @@ function M.debug_dump(bufnr)
     auto_enable = auto_on,
     user_enabled = st.user_enabled,
     dominant_meter = st.dominant_meter,
+    dominant_strength = st.dominant_strength,
     last_error = st.last_error,
     debug_scan_count = st.debug_scan_count,
     debug_cli_count = st.debug_cli_count,

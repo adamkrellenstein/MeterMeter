@@ -18,6 +18,7 @@ function M.new_state()
     last_view_sig = "",
     last_render_sig = "",
     dominant_meter = "",
+    dominant_strength = 0,
     last_error = nil, -- string or nil; most recent CLI error message
     debug_scan_count = 0,
     debug_cli_count = 0,

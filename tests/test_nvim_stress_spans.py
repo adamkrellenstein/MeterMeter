@@ -23,7 +23,11 @@ class NvimStressSpanTests(unittest.TestCase):
         engine = MeterEngine()
         a = engine.analyze_line(line, line_no=0)
         self.assertIsNotNone(a)
-        spans = metermeter_cli._stress_spans_from_syllables(a.source_text, a.syllable_positions)
+        spans = metermeter_cli._stress_spans_from_syllables(
+            a.source_text,
+            a.syllable_positions,
+            a.syllable_char_spans,
+        )
         self.assertTrue(spans, "expected at least one stress span")
 
         token_start = line.find("pollen")
@@ -43,7 +47,11 @@ class NvimStressSpanTests(unittest.TestCase):
         engine = MeterEngine()
         a = engine.analyze_line(line, line_no=0)
         self.assertIsNotNone(a)
-        spans = metermeter_cli._stress_spans_from_syllables(a.source_text, a.syllable_positions)
+        spans = metermeter_cli._stress_spans_from_syllables(
+            a.source_text,
+            a.syllable_positions,
+            a.syllable_char_spans,
+        )
         self.assertTrue(spans, "expected at least one stress span")
         encoded_len = len(line.encode("utf-8"))
         for s, e in spans:
@@ -66,7 +74,11 @@ class NvimStressSpanTests(unittest.TestCase):
         engine = MeterEngine()
         a = engine.analyze_line(line, line_no=0)
         self.assertIsNotNone(a)
-        spans = metermeter_cli._stress_spans_from_syllables(a.source_text, a.syllable_positions)
+        spans = metermeter_cli._stress_spans_from_syllables(
+            a.source_text,
+            a.syllable_positions,
+            a.syllable_char_spans,
+        )
         self.assertTrue(spans, "expected stress spans for apostrophe token")
         encoded_len = len(line.encode("utf-8"))
         for s, e in spans:
@@ -118,3 +130,27 @@ class NvimStressSpanTests(unittest.TestCase):
             self.assertGreaterEqual(s, 0)
             self.assertLessEqual(e, encoded_len)
             self.assertGreater(e, s)
+
+    def test_char_span_path_is_used_when_available(self) -> None:
+        text = "the na\u00efve heart"
+        spans = metermeter_cli._stress_spans_from_syllables(
+            text,
+            [("the", False), ("na", True), ("heart", True)],
+            [(0, 3), (4, 6), (10, 15)],
+        )
+        self.assertEqual(len(spans), 2)
+        # "na" begins after "the ".
+        self.assertEqual(spans[0][0], len("the ".encode("utf-8")))
+
+    def test_engine_emits_monotonic_char_spans(self) -> None:
+        line = "Nor shall Death brag thou wander'st in his shade,"
+        engine = MeterEngine()
+        a = engine.analyze_line(line, line_no=0)
+        self.assertIsNotNone(a)
+        assert a is not None
+        prev_end = 0
+        for start, end in a.syllable_char_spans:
+            self.assertGreaterEqual(start, prev_end)
+            self.assertGreater(end, start)
+            self.assertLessEqual(end, len(line))
+            prev_end = end

@@ -88,3 +88,16 @@ class PersistentProtocolTests(unittest.TestCase):
         resps = _run_persistent([{"id": 5, "lines": []}])
         self.assertEqual(resps[0]["results"], [])
         self.assertEqual(resps[0]["eval"]["line_count"], 0)
+
+    def test_optional_context_is_accepted(self) -> None:
+        resps = _run_persistent([{
+            "id": 31,
+            "lines": self.LINES[:2],
+            "context": {
+                "dominant_meter": "iambic pentameter",
+                "dominant_strength": 0.75,
+            },
+        }])
+        self.assertEqual(len(resps), 1)
+        self.assertEqual(resps[0]["id"], 31)
+        self.assertEqual(len(resps[0]["results"]), 2)
