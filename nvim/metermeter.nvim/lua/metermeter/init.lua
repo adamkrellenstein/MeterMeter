@@ -872,6 +872,30 @@ function M.setup(opts)
       M.enable(bufnr)
     end
   end
+
+  -- Auto-inject into lualine if available. By VimEnter all plugins are loaded so lualine's
+  -- config is final. Guard with a global flag so re-calling setup() doesn't duplicate the component.
+  vim.api.nvim_create_autocmd("VimEnter", {
+    once = true,
+    group = group,
+    callback = function()
+      if vim.g._metermeter_lualine_injected then return end
+      local ok, lualine = pcall(require, "lualine")
+      if not ok or type(lualine) ~= "table" then return end
+      if type(lualine.get_config) ~= "function" or type(lualine.setup) ~= "function" then return end
+      local lualine_cfg = lualine.get_config()
+      if not lualine_cfg then return end
+      vim.g._metermeter_lualine_injected = true
+      local comp = function() return M.statusline() end
+      lualine_cfg.sections = lualine_cfg.sections or {}
+      lualine_cfg.sections.lualine_x = lualine_cfg.sections.lualine_x or {}
+      table.insert(lualine_cfg.sections.lualine_x, 1, comp)
+      lualine_cfg.inactive_sections = lualine_cfg.inactive_sections or {}
+      lualine_cfg.inactive_sections.lualine_x = lualine_cfg.inactive_sections.lualine_x or {}
+      table.insert(lualine_cfg.inactive_sections.lualine_x, 1, comp)
+      lualine.setup(lualine_cfg)
+    end,
+  })
 end
 
 return M
