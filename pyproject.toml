@@ -1,0 +1,14 @@
+[project]
+name = "metermeter"
+version = "0.1.0"
+description = "Local, real-time poetic meter annotation for Neovim"
+requires-python = ">=3.11"
+dependencies = [
+    "prosodic>=2.1",
+    "setuptools<71",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=9",
+]
