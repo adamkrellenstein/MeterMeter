@@ -338,7 +338,17 @@ local function default_subprocess_cmd()
   -- which may resolve to a system Python without prosodic installed.
   local project_root = vim.fn.fnamemodify(root, ":h:h")
   local venv_python = project_root .. "/.venv/bin/python3"
-  local python = vim.fn.executable(venv_python) == 1 and venv_python or "python3"
+
+  -- Try venv Python first, then try from cwd (useful in headless testing)
+  local python = "python3"
+  if vim.fn.executable(venv_python) == 1 then
+    python = venv_python
+  else
+    local cwd_venv = vim.fn.getcwd() .. "/.venv/bin/python3"
+    if vim.fn.executable(cwd_venv) == 1 then
+      python = cwd_venv
+    end
+  end
   return { python, script }
 end
 
