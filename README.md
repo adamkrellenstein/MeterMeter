@@ -46,7 +46,7 @@ The only widely-used English gold standard is [For Better For Verse](https://git
 | Scandroid (Hartman) | Dict + rules → stress → feet | ~90% | -- |
 | ZeuScansion (Agirrezabal 2016) | Dict + POS + Groves rules → stress → template | 86.78% | -- |
 | BiLSTM-CRF (Agirrezabal 2017) | Neural sequence labeling | 92.96% | 61.39% |
-| **MeterMeter** | **Dict + function-word rules → stress → template** | **~85%** | **~73%** |
+| **MeterMeter** | **Dict + function-word rules → stress → template** | **~87%** | **~74%** |
 
 Per-syllable accuracy is naturally high because most syllables are unambiguous; per-line is strict because a single wrong stress fails the whole line. The main error source for all systems is context-dependent monosyllable stress (e.g. "hath", "all", "too"), which requires poem-level context to resolve.
 
