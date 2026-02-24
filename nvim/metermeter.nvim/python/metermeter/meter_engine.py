@@ -82,45 +82,6 @@ class LineAnalysis:
     syllable_positions: List[Tuple[str, bool]] = field(default_factory=list)
 
 
-def _infer_meter(meter_str: str) -> Tuple[str, int]:
-    """Infer foot name and count from prosodic's meter_str (- = weak, + = strong)."""
-    us = "".join("S" if c == "+" else "U" for c in (meter_str or ""))
-    n = len(us)
-    if n == 0:
-        return "iambic", 5
-
-    # Score each candidate: lower dist = better (convert to score to apply bonuses).
-    best_name = "iambic"
-    best_feet = max(1, round(n / 2))
-    best_score: float = -float("inf")
-
-    for foot_name, foot in FOOT_TEMPLATES.items():
-        unit = len(foot)
-        approx = max(1, round(n / unit))
-        for f in range(max(1, approx - 1), min(7, approx + 2)):
-            expanded = foot * f
-            common = min(len(expanded), n)
-            dist = float(sum(1 for i in range(common) if expanded[i] != us[i]))
-            dist += abs(len(expanded) - n)
-            normalizer = max(len(expanded), n, 1)
-            score = 1.0 - dist / normalizer
-            # Apply same pentameter/hexameter biases used elsewhere.
-            if 9 <= n <= 11:
-                if foot_name == "iambic" and f == 5:
-                    score += IAMBIC_PENTAMETER_BONUS
-                elif foot_name == "trochaic" and f == 5:
-                    score += TROCHAIC_PENTAMETER_BONUS
-                elif foot_name in {"anapestic", "dactylic"}:
-                    score -= TERNARY_METER_PENALTY
-            if 12 <= n <= 13 and foot_name == "iambic" and f == 6:
-                score += IAMBIC_HEXAMETER_BONUS
-            if score > best_score:
-                best_score = score
-                best_name = foot_name
-                best_feet = f
-
-    return best_name, best_feet
-
 
 class MeterEngine:
     def __init__(self) -> None:
