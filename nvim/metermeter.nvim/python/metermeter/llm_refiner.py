@@ -70,6 +70,7 @@ class LLMRefiner:
         self.api_key = api_key.strip()
         self.last_error = ""
         self.last_raw_response = ""
+        self.last_dominant_meter = ""
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -80,25 +81,44 @@ class LLMRefiner:
     def _system_prompt(self, dominant_meter: str = "", dominant_ratio: float = 0.0) -> str:
         dominant_clause = ""
         if dominant_meter:
-            dominant_clause = (
-                "Poem-level prior: the dominant meter is '{}'"
-                " (ratio {:.0f}%). Prefer that meter unless the line clearly deviates. ".format(
-                    dominant_meter, max(0.0, min(1.0, dominant_ratio)) * 100.0
+            ratio_pct = max(0.0, min(1.0, dominant_ratio)) * 100.0
+            if ratio_pct >= 80.0:
+                dominant_clause = (
+                    "IMPORTANT: The dominant poem meter is '{}' ({:.0f}% of lines). "
+                    "This OVERRIDES the per-line baseline_meter when they conflict. "
+                    "A line that starts with a stressed syllable in an iambic poem is a first-foot inversion — "
+                    "still label it '{}', not as trochaic. "
+                    "Only deviate from the dominant meter if the line's syllable count or stress pattern "
+                    "is fundamentally incompatible (e.g. clearly different foot count). ".format(
+                        dominant_meter, ratio_pct, dominant_meter
+                    )
                 )
+            else:
+                dominant_clause = (
+                    "Poem-level prior: the dominant meter is '{}' ({:.0f}%). "
+                    "Prefer that meter unless the line clearly deviates. ".format(
+                        dominant_meter, ratio_pct
+                    )
+                )
+        else:
+            dominant_clause = (
+                "All lines below are from the same poem. "
+                "Before classifying individual lines, identify the dominant meter of the poem "
+                "from the overall syllable counts and stress patterns across all lines. "
+                "Use that dominant meter as your prior for each line. "
+                "Common substitutions (initial trochee, spondee, feminine ending) do NOT change the overall meter label; "
+                "keep the dominant meter unless a line's syllable count or stress pattern is fundamentally incompatible. "
             )
         return (
             "You are an expert in English poetic meter and scansion. "
             "Analyze stress at the whole-line level, not per-word dictionary stress in isolation. "
-            "Use each line's baseline_meter and baseline_confidence as priors; do not deviate unless strong evidence supports it. "
-            "Common substitutions (initial trochee, spondee, feminine ending) do NOT change the overall meter label; "
-            "keep 'iambic pentameter' unless the line consistently fits another meter. "
             + dominant_clause
-            + "For lines with 9-11 syllables, pentameter is the default unless stress pattern strongly conflicts. "
-            "Do NOT output a single U/S per token; expand each token to match token_syllables exactly. "
+            + "Do NOT output a single U/S per token; expand each token to match token_syllables exactly. "
             "token_stress_patterns must use ONLY 'U' and 'S' characters (no separators like '/', '-', '.'). "
             "Example: token_syllables [1,2] -> token_stress_patterns [\"U\",\"US\"]. "
             "If unsure, copy baseline_token_patterns exactly (same length as token_syllables). "
-            "Return ONLY strict JSON with this exact top-level shape: {\"results\":[...]}. "
+            "Also include a top-level 'dominant_meter' string field with the poem's overall meter. "
+            "Return ONLY strict JSON with this exact top-level shape: {\"dominant_meter\":\"...\",\"results\":[...]}. "
             "Return exactly one result object per input line_no; do not omit any line. "
             "Each result must include: line_no (int), meter_name (string), confidence (0..1 number), "
             "token_stress_patterns (list of strings). "
@@ -130,22 +150,16 @@ class LLMRefiner:
         m2 = re.search(r"\b(monometer|dimeter|trimeter|tetrameter|pentameter|hexameter)\b", s)
         if m2:
             feet_name = m2.group(1)
-            if foot_name == "iambic" and 9 <= syllables <= 11:
-                feet_name = "pentameter"
             return "{} {}".format(foot_name, feet_name)
 
         m3 = re.search(r"\b([1-6])\s*[- ]*foot\b", s)
         if m3:
             feet = int(m3.group(1))
-            if foot_name == "iambic" and 9 <= syllables <= 11:
-                feet = 5
             return "{} {}".format(foot_name, LINE_NAME_BY_FEET.get(feet, "pentameter"))
 
         unit = 3 if foot_name in {"anapestic", "dactylic"} else 2
         feet = int(round(float(syllables) / float(unit)))
         feet = max(1, min(6, feet))
-        if foot_name == "iambic" and 9 <= syllables <= 11:
-            feet = 5
         return "{} {}".format(foot_name, LINE_NAME_BY_FEET.get(feet, "pentameter"))
 
     def _debug_path(self) -> str:
@@ -257,7 +271,7 @@ class LLMRefiner:
         dominant_ratio = max(0.0, min(1.0, float(dominant_ratio)))
 
         # Scale completion budget with batch size to reduce truncation risk on strict JSON output.
-        max_tokens = min(3200, max(900, 220 * len(lines) + 300))
+        max_tokens = min(8000, max(900, 220 * len(lines) + 300))
         payload = {
             "model": self.model,
             "temperature": max(0.0, min(1.0, float(temperature))),
@@ -312,6 +326,9 @@ class LLMRefiner:
         obj = _extract_json_obj(content)
         if obj is None:
             self._raise_invalid_response("content_not_json_object", payload, raw)
+        llm_dominant = str(obj.get("dominant_meter") or "").strip().lower()
+        if llm_dominant:
+            self.last_dominant_meter = llm_dominant
         results = obj.get("results")
         if not isinstance(results, list):
             self._raise_invalid_response("missing_results", payload, raw)

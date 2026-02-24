@@ -38,21 +38,29 @@ line text
   → Neovim extmarks
 ```
 
-The LLM receives the baseline context and refines meter labels and per-token stress patterns. Post-LLM overrides catch cases where the LLM drifts from what the stress pattern actually supports.
+The LLM receives all lines of a poem in a single batch and determines the dominant meter holistically before classifying each line. When poem-level context is already established (Neovim plugin, where the buffer provides prior context), a pre-computed `dominant_meter` can be passed instead. Post-LLM overrides catch cases where the LLM drifts from what the stress pattern actually supports.
 
 If the LLM is unavailable or fails, no annotations are shown for that scan.
 
-### Deterministic baseline accuracy
+### Design rationale
+
+Per-line meter accuracy is inherently limited for all systems because context-dependent monosyllable stress (e.g. "hath", "all", "too") can only be resolved with poem-level context. The deterministic prosodic baseline matches published SOTA on the 4B4V corpus at the per-line level (~60.5%, vs Agirrezabal 2017 BiLSTM-CRF at 61.39%). The LLM layer adds poem-level contextual reasoning that pushes accuracy toward 70% — a fundamentally different approach from training a supervised model on labeled data.
+
+The key insight: rather than pre-computing a dominant meter from (often wrong) baseline results and injecting it as context, the LLM receives the entire poem at once and determines the dominant meter itself. This eliminates the context poisoning that occurs when the baseline misclassifies anapestic or trochaic poems as iambic.
+
+### Benchmark results
 
 On the For Better For Verse (4B4V) annotated corpus (1,181 lines, 85 poems):
 
-| Metric | Score |
-|--------|-------|
-| Meter classification | 71% |
-| Per-syllable stress | 66% |
-| Iambic pentameter stress F1 | 68% |
+| System | Per-syllable | Per-line meter |
+|--------|-------------|---------------|
+| ZeuScansion (FST + rules, 2016) | 86.78% | — |
+| BiLSTM-CRF (Agirrezabal, 2017) | 92.96% | 61.39% |
+| MeterMeter prosodic baseline | ~66% | ~60.5% |
+| MeterMeter + LLM, gold context | — | ~70.0% |
+| MeterMeter + LLM, poem-batch | — | TBD (target 65–70%) |
 
-The main sources of error are archaic spellings that `prosodic`'s phoneme model syllabifies differently from the corpus annotators, and lines with first-foot inversions (trochaic substitution in an iambic poem), which a single-line meter classifier cannot resolve without poem context. The LLM layer addresses both by having access to the surrounding poem.
+Note: per-syllable and per-line measure different things. Per-syllable is high because most syllables are unambiguous; per-line is low because a single monosyllable stress error fails the whole line. MeterMeter optimizes for per-line accuracy (the user-facing metric).
 
 ## Requirements
 

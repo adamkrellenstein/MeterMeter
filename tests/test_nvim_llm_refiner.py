@@ -316,6 +316,6 @@ class NvimLLMRefinerTests(unittest.TestCase):
         messages = payload.get("messages") or []
         self.assertGreaterEqual(len(messages), 2)
         system_text = str((messages[0] or {}).get("content") or "")
-        self.assertIn("dominant meter is 'iambic pentameter'", system_text)
+        self.assertIn("iambic pentameter", system_text)
         user_obj = json.loads(str((messages[1] or {}).get("content") or "{}"))
         self.assertEqual((user_obj.get("context") or {}).get("dominant_meter"), "iambic pentameter")

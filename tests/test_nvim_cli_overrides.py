@@ -99,41 +99,44 @@ class IambicGuardTests(unittest.TestCase):
         )
         self.assertIsNone(result)
 
-    def test_guard_no_override_when_pattern_too_short(self) -> None:
-        result = metermeter_cli._try_iambic_guard(
-            meter_name="trochaic tetrameter", conf=0.60,
-            pattern_best_meter="iambic pentameter",
-            pattern_best_score=0.75, pattern_best_margin=0.05,
-            stress_pattern="USUSUSUS",  # 8 syllables, outside 9-11 range
-        )
-        self.assertIsNone(result)
-
     def test_guard_no_override_when_pattern_not_iambic(self) -> None:
         result = metermeter_cli._try_iambic_guard(
             meter_name="trochaic tetrameter", conf=0.60,
-            pattern_best_meter="trochaic tetrameter",  # Not iambic pentameter
+            pattern_best_meter="trochaic tetrameter",  # Pattern agrees with LLM
             pattern_best_score=0.75, pattern_best_margin=0.05,
             stress_pattern="USUSUSUSUS",
         )
         self.assertIsNone(result)
 
-    def test_guard_boundary_syllable_counts(self) -> None:
-        # 9 syllables: should trigger
+    def test_guard_no_override_when_not_trochaic(self) -> None:
+        result = metermeter_cli._try_iambic_guard(
+            meter_name="anapestic trimeter", conf=0.60,
+            pattern_best_meter="iambic pentameter",
+            pattern_best_score=0.75, pattern_best_margin=0.05,
+            stress_pattern="USUSUSUSUS",
+        )
+        self.assertIsNone(result)
+
+    def test_guard_fires_for_tetrameter(self) -> None:
+        result = metermeter_cli._try_iambic_guard(
+            meter_name="trochaic tetrameter", conf=0.60,
+            pattern_best_meter="iambic tetrameter",
+            pattern_best_score=0.75, pattern_best_margin=0.05,
+            stress_pattern="USUSUSUS",
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "iambic tetrameter")
+        self.assertEqual(result[2], "iambic_guard")
+
+    def test_guard_suppressed_with_precomputed_context(self) -> None:
         result = metermeter_cli._try_iambic_guard(
             meter_name="trochaic pentameter", conf=0.60,
             pattern_best_meter="iambic pentameter",
             pattern_best_score=0.75, pattern_best_margin=0.05,
-            stress_pattern="USUSUSUSU",  # 9 syllables
+            stress_pattern="USUSUSUSUS",
+            has_precomputed_context=True,
         )
-        self.assertIsNotNone(result)
-        # 11 syllables: should trigger
-        result = metermeter_cli._try_iambic_guard(
-            meter_name="trochaic pentameter", conf=0.60,
-            pattern_best_meter="iambic pentameter",
-            pattern_best_score=0.75, pattern_best_margin=0.05,
-            stress_pattern="USUSUSUSUUS",  # 11 syllables
-        )
-        self.assertIsNotNone(result)
+        self.assertIsNone(result)
 
 
 class BaselineGuardTests(unittest.TestCase):
@@ -172,6 +175,16 @@ class BaselineGuardTests(unittest.TestCase):
             baseline_meter="iambic pentameter",
             baseline_conf=0.80,
             stress_pattern="USUSUSUSUS",
+        )
+        self.assertIsNone(result)
+
+    def test_guard_suppressed_with_precomputed_context(self) -> None:
+        result = metermeter_cli._try_baseline_guard(
+            meter_name="trochaic pentameter", conf=0.70,
+            baseline_meter="iambic pentameter",
+            baseline_conf=0.80,
+            stress_pattern="USUSUSUSUS",
+            has_precomputed_context=True,
         )
         self.assertIsNone(result)
 

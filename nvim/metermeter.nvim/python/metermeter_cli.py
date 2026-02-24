@@ -22,6 +22,7 @@ DOMINANT_RATIO_MIN = 0.75
 DOMINANT_MIN_LINES = 6
 DOMINANT_LOW_CONF = 0.65
 DOMINANT_SCORE_DELTA = 0.08
+DOMINANT_COERCION_RATIO = 0.85
 
 
 def _resolve_path(path: str, env_var: str, fallback_filenames: List[str]) -> str:
@@ -162,9 +163,14 @@ def _read_stdin_json() -> dict:
 
 def _try_pattern_rescore(
     meter_name: str, conf: float, pattern_best_meter: str,
-    pattern_best_score: float, pattern_best_margin: float, **_: object,
+    pattern_best_score: float, pattern_best_margin: float,
+    dominant_meter: str = "", dominant_ratio: float = 0.0, **_: object,
 ) -> Optional[Tuple[str, float, str]]:
     """Override if deterministic pattern scoring strongly disagrees with LLM label."""
+    # Don't override the LLM when it agrees with an established dominant meter —
+    # pattern mismatches there are expected (first-foot inversions, substitutions).
+    if dominant_meter and dominant_ratio >= 0.80 and meter_name == dominant_meter:
+        return None
     if (
         pattern_best_meter
         and pattern_best_meter != meter_name
@@ -178,13 +184,15 @@ def _try_pattern_rescore(
 def _try_iambic_guard(
     meter_name: str, conf: float, pattern_best_meter: str,
     pattern_best_score: float, pattern_best_margin: float,
-    stress_pattern: str, **_: object,
+    stress_pattern: str, has_precomputed_context: bool = False, **_: object,
 ) -> Optional[Tuple[str, float, str]]:
-    """Correct to iambic pentameter when stress pattern fits and LLM confidence is low."""
+    """Correct trochaic->iambic when pattern scoring confirms iambic and LLM confidence is low."""
+    if has_precomputed_context:
+        return None
     if (
-        pattern_best_meter == "iambic pentameter"
+        pattern_best_meter.startswith("iambic")
+        and meter_name.startswith("trochaic")
         and meter_name != pattern_best_meter
-        and 9 <= len(stress_pattern) <= 11
         and pattern_best_score >= IAMBIC_GUARD_MIN_SCORE
         and pattern_best_margin >= IAMBIC_GUARD_MIN_MARGIN
         and conf <= IAMBIC_GUARD_MAX_CONF
@@ -195,9 +203,11 @@ def _try_iambic_guard(
 
 def _try_baseline_guard(
     meter_name: str, conf: float, baseline_meter: str,
-    baseline_conf: float, stress_pattern: str, **_: object,
+    baseline_conf: float, stress_pattern: str, has_precomputed_context: bool = False, **_: object,
 ) -> Optional[Tuple[str, float, str]]:
     """Restore baseline iambic pentameter when LLM drifted but engine was confident."""
+    if has_precomputed_context:
+        return None
     if (
         baseline_meter == "iambic pentameter"
         and meter_name != baseline_meter
@@ -234,12 +244,40 @@ def _try_dominant_smoothing(
     return None
 
 
+def _try_dominant_coercion(
+    meter_name: str, conf: float,
+    dominant_meter: str, dominant_ratio: float, dominant_line_count: int,
+    engine: MeterEngine, **_: object,
+) -> Optional[Tuple[str, float, str]]:
+    """Coerce to dominant when it's very strong and we have same-foot-count iambic/trochaic confusion."""
+    if (
+        not dominant_meter
+        or dominant_ratio < DOMINANT_COERCION_RATIO
+        or dominant_line_count < DOMINANT_MIN_LINES
+        or meter_name == dominant_meter
+        or conf > DOMINANT_LOW_CONF
+    ):
+        return None
+    dom = engine._parse_meter_name(dominant_meter)
+    cur = engine._parse_meter_name(meter_name)
+    if not dom or not cur:
+        return None
+    dom_foot, dom_feet = dom
+    cur_foot, cur_feet = cur
+    if dom_feet != cur_feet:
+        return None
+    if dom_foot in {"iambic", "trochaic"} and cur_foot in {"iambic", "trochaic"} and dom_foot != cur_foot:
+        return dominant_meter, min(conf, 0.70), "dominant_coercion"
+    return None
+
+
 # Override functions applied in priority order; first match wins.
 _METER_OVERRIDES = [
     _try_pattern_rescore,
     _try_iambic_guard,
     _try_baseline_guard,
     _try_dominant_smoothing,
+    _try_dominant_coercion,
 ]
 
 
@@ -366,6 +404,7 @@ def main() -> int:
         meter_overridden = False
         override_reason = ""
 
+        has_precomputed_context = bool(context_cfg.get("dominant_meter")) if isinstance(context_cfg, dict) else False
         override_ctx = dict(
             meter_name=meter_name, conf=float(conf),
             pattern_best_meter=pattern_best_meter,
@@ -375,6 +414,7 @@ def main() -> int:
             baseline_meter=baseline_meter, baseline_conf=baseline_conf,
             dominant_meter=dominant_meter, dominant_ratio=dominant_ratio,
             dominant_line_count=dominant_line_count, engine=engine,
+            has_precomputed_context=has_precomputed_context,
         )
         for override_fn in _METER_OVERRIDES:
             result = override_fn(**override_ctx)
