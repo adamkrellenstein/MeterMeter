@@ -51,7 +51,8 @@ class StressAccuracyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.corpus = parse_corpus(_4B4V_DIR)
-        assert cls.corpus, f"4B4V corpus not found at {_4B4V_DIR}"
+        if not cls.corpus:
+            raise unittest.SkipTest(f"4B4V corpus not found at {_4B4V_DIR}")
 
         raw = int(os.environ.get("MM_TEST_MAX_LINES", str(_DEFAULT_MAX_LINES)))
         all_line_args: List[_LineArgs] = [
