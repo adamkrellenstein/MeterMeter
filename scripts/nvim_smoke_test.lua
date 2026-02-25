@@ -294,7 +294,7 @@ local function run_confidence_shading()
       local has_eol2 = false
       for _, m in ipairs(marks) do
         local d = m[4] or {}
-        if d.virt_text and d.virt_text[1][2] == "MeterMeterEOL2" then
+        if d.virt_text and d.virt_text[1][2] == "MeterMeterEOL1" then
           has_eol2 = true
           break
         end
