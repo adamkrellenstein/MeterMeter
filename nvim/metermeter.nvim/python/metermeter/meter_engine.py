@@ -602,7 +602,13 @@ class MeterEngine:
             else:
                 raw_word = str(getattr(wt, "txt", "") or "")
                 raw_word_l = raw_word.lower().strip()
-                token_start = max(0, min(line_char_len, line.lower().find(raw_word_l)))
+                # Search forward from the last token's end to avoid matching an
+                # earlier occurrence of the same word (e.g. "love love love").
+                search_from = token_spans[token_cursor - 1][1] if token_cursor > 0 and token_cursor <= len(token_spans) else 0
+                found_pos = line.lower().find(raw_word_l, search_from)
+                if found_pos == -1:
+                    found_pos = max(0, search_from)
+                token_start = max(0, min(line_char_len, found_pos))
                 token_end = max(token_start + 1, min(line_char_len, token_start + max(1, len(raw_word_l))))
                 token_text = line[token_start:token_end]
 

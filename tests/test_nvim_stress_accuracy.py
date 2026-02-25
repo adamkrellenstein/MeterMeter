@@ -1,8 +1,10 @@
 import os
 import signal
-import sys
 import unittest
 from typing import List, Optional, Tuple
+
+from parse_4b4v import parse_corpus
+from metermeter.meter_engine import MeterEngine
 
 # Per-line timeout: skip lines that prosodic can't parse quickly.
 _LINE_TIMEOUT_S = 5
@@ -21,18 +23,6 @@ def _analyze_with_timeout(engine, text: str):
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old)
-
-def _nvim_python_path() -> str:
-    here = os.path.dirname(__file__)
-    return os.path.join(here, "..", "nvim", "metermeter.nvim", "python")
-
-_NVIM_PY = os.path.abspath(_nvim_python_path())
-_BENCH_PY = os.path.join(os.path.dirname(__file__), "..", "benchmarks")
-sys.path.insert(0, _NVIM_PY)
-sys.path.insert(0, _BENCH_PY)
-
-from parse_4b4v import parse_corpus  # noqa: E402
-from metermeter.meter_engine import MeterEngine  # noqa: E402
 
 _4B4V_DIR = os.path.join(os.path.dirname(__file__), "..", "benchmarks", "data", "poems")
 

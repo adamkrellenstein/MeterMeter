@@ -1,12 +1,8 @@
 """Integration tests for the persistent subprocess protocol in metermeter_cli."""
 import io
 import json
-import os
 import sys
 import unittest
-
-_HERE = os.path.dirname(__file__)
-sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "nvim", "metermeter.nvim", "python")))
 
 import metermeter_cli
 

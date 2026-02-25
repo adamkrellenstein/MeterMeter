@@ -1,18 +1,7 @@
-import json
-import os
-import sys
 import unittest
 
-
-def _nvim_python_path() -> str:
-    here = os.path.dirname(__file__)
-    return os.path.join(here, "..", "nvim", "metermeter.nvim", "python")
-
-
-sys.path.insert(0, os.path.abspath(_nvim_python_path()))
-
-import metermeter_cli  # noqa: E402
-from metermeter.meter_engine import MeterEngine  # noqa: E402
+import metermeter_cli
+from metermeter.meter_engine import MeterEngine
 
 
 class NvimStressSpanTests(unittest.TestCase):
@@ -149,8 +138,8 @@ class NvimStressSpanTests(unittest.TestCase):
         self.assertIsNotNone(a)
         assert a is not None
         prev_end = 0
-        for start, end in a.syllable_char_spans:
-            self.assertGreaterEqual(start, prev_end)
-            self.assertGreater(end, start)
-            self.assertLessEqual(end, len(line))
-            prev_end = end
+        for span_start, span_end in a.syllable_char_spans:
+            self.assertGreaterEqual(span_start, prev_end)
+            self.assertGreater(span_end, span_start)
+            self.assertLessEqual(span_end, len(line))
+            prev_end = span_end

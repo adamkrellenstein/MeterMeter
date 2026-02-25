@@ -1,16 +1,6 @@
-import os
-import sys
 import unittest
 
-
-def _nvim_python_path() -> str:
-    here = os.path.dirname(__file__)
-    return os.path.join(here, "..", "nvim", "metermeter.nvim", "python")
-
-
-sys.path.insert(0, os.path.abspath(_nvim_python_path()))
-
-from metermeter.meter_engine import MeterEngine  # noqa: E402
+from metermeter.meter_engine import MeterEngine
 
 
 SONNET_116 = [

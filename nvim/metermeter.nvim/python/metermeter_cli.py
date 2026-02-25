@@ -29,12 +29,12 @@ def _stress_spans_from_syllables(
         for (span_start, span_end), (_, is_strong) in zip(syllable_char_spans, syllable_positions):
             if not is_strong:
                 continue
-            start = max(0, min(text_len, int(span_start)))
-            end = max(0, min(text_len, int(span_end)))
-            if end <= start:
+            s = max(0, min(text_len, int(span_start)))
+            e = max(0, min(text_len, int(span_end)))
+            if e <= s:
                 continue
-            b_s = _char_to_byte_index(text, start)
-            b_e = _char_to_byte_index(text, end)
+            b_s = _char_to_byte_index(text, s)
+            b_e = _char_to_byte_index(text, e)
             if b_e > b_s:
                 spans.append([b_s, b_e])
         return spans
@@ -49,11 +49,11 @@ def _stress_spans_from_syllables(
         idx = text_lower.find(syl_lower, cursor)
         if idx == -1:
             continue
-        end = idx + len(syl_lower)
-        cursor = end
+        syl_end = idx + len(syl_lower)
+        cursor = syl_end
         if is_strong:
             b_s = _char_to_byte_index(text, idx)
-            b_e = _char_to_byte_index(text, end)
+            b_e = _char_to_byte_index(text, syl_end)
             if b_e > b_s:
                 spans.append([b_s, b_e])
     return spans
@@ -127,39 +127,22 @@ def main() -> int:
     if not raw.strip():
         return 0
     req = json.loads(raw)
-    lines = req.get("lines") or []
     context = req.get("context")
     if not isinstance(context, dict):
         context = None
+    items = [
+        item for item in (req.get("lines") or [])
+        if isinstance(item, dict)
+        and isinstance(item.get("lnum"), int)
+        and isinstance(item.get("text"), str)
+    ]
 
     engine = MeterEngine()
-    results = []
-    for item in lines:
-        if not isinstance(item, dict):
-            continue
-        lnum = item.get("lnum")
-        text = item.get("text")
-        if not isinstance(lnum, int) or not isinstance(text, str):
-            continue
-        a = engine.analyze_line(text, line_no=lnum, context=context)
-        if a is None:
-            continue
-        spans = _stress_spans_from_syllables(
-            a.source_text,
-            a.syllable_positions,
-            getattr(a, "syllable_char_spans", None),
-        )
-        results.append({
-            "lnum": int(a.line_no),
-            "text": a.source_text,
-            "meter_name": a.meter_name,
-            "confidence": float(a.confidence),
-            "stress_spans": spans,
-        })
+    results = [r for item in items for r in [_analyze_line(engine, item, context=context)] if r is not None]
 
     payload = {
         "results": results,
-        "eval": {"line_count": len(results), "result_count": len(results)},
+        "eval": {"line_count": len(items), "result_count": len(results)},
     }
     sys.stdout.write(json.dumps(payload, ensure_ascii=True))
     return 0

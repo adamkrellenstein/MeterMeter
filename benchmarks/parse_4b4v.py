@@ -10,31 +10,24 @@ for benchmarking the MeterMeter pipeline.
 """
 import os
 import re
+import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+
+# Ensure the nvim python path is importable so we can reuse canonical constants.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_NVIM_PY = os.path.join(_HERE, "..", "nvim", "metermeter.nvim", "python")
+if _NVIM_PY not in sys.path:
+    sys.path.insert(0, _NVIM_PY)
+
+from metermeter.meter_engine import FOOT_TEMPLATES, LINE_NAME_BY_FEET as LINE_NAMES
 
 # TEI namespace used by 4B4V XML files.
 TEI_NS = "http://www.tei-c.org/ns/1.0"
 
 # 4B4V encodes stress as + (stressed) and - (unstressed).
 _STRESS_MAP = {"+": "S", "-": "U"}
-
-FOOT_TEMPLATES = {
-    "iambic": "US",
-    "trochaic": "SU",
-    "anapestic": "UUS",
-    "dactylic": "SUU",
-}
-
-LINE_NAMES = {
-    1: "monometer",
-    2: "dimeter",
-    3: "trimeter",
-    4: "tetrameter",
-    5: "pentameter",
-    6: "hexameter",
-}
 
 
 @dataclass
