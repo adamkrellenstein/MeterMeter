@@ -23,6 +23,9 @@ function M.new_state()
     debug_scan_count = 0,
     debug_cli_count = 0,
     debug_apply_count = 0,
+    pending_lnums = {},
+    spinner_frame = 0,
+    loading_timer = nil,
   }
 end
 
@@ -31,6 +34,11 @@ function M.stop_scan_state(st)
   st.scan_changedtick = -1
   st.last_changedtick = -1
   st.last_view_sig = ""
+  if st.loading_timer then
+    st.loading_timer:stop()
+    st.loading_timer:close()
+    st.loading_timer = nil
+  end
 end
 
 return M

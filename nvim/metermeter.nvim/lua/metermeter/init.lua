@@ -15,6 +15,8 @@ local function refresh_statusline()
 end
 
 local ns = vim.api.nvim_create_namespace("metermeter")
+local loading_ns = vim.api.nvim_create_namespace("metermeter_loading")
+local SPINNER = { "⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏" }
 
 local DEFAULTS = {
   debounce_ms = 80,
@@ -24,7 +26,10 @@ local DEFAULTS = {
   ui = {
     stress = true,
     meter_hints = true,
-    meter_hint_confidence_levels = 6, -- number of discrete tint steps (>= 2)
+    confident_threshold = 0.7,   -- >= this: full brightness (MeterMeterEOL2)
+    uncertain_threshold = 0.4,   -- >= this: medium brightness (MeterMeterEOL1)
+    -- below uncertain_threshold => dimmest (MeterMeterEOL0, Comment color)
+    loading_indicator = true,
   },
 
   -- If true, only annotate lines that end with a trailing "\" (useful for mixed-format files).
@@ -103,6 +108,7 @@ local function compute_stress_hl()
   -- Bold overlay so it stays visible even when Normal bg is pure black.
   vim.api.nvim_set_hl(0, "MeterMeterStress", { bold = true })
   vim.api.nvim_set_hl(0, "MeterMeterEOL", { link = "Comment" })
+  vim.api.nvim_set_hl(0, "MeterMeterLoading", { link = "Comment" })
 end
 
 local function _blend_rgb(a, b, t)
@@ -119,17 +125,8 @@ local function _blend_rgb(a, b, t)
   return rr * 65536 + rg * 256 + rb
 end
 
-local function _clamp_levels()
-  local levels = tonumber(cfg.ui.meter_hint_confidence_levels) or 6
-  if levels < 2 then levels = 2 end
-  if levels > 12 then levels = 12 end
-  return levels
-end
-
 local function compute_eol_hls()
-  -- Confidence-driven meter hint: more confident => closer to Normal, less confident => closer to Comment.
-  local levels = _clamp_levels()
-
+  -- Three-tier confidence system: dimmest (free-verse), medium (uncertain), brightest (confident).
   local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = true }) or {}
   local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = true }) or {}
   local nfg = normal.fg or normal.foreground
@@ -139,30 +136,37 @@ local function compute_eol_hls()
   -- If we don't have truecolor info, fall back to cterm greys.
   if type(nfg) ~= "number" or type(nbg) ~= "number" or type(cfgc) ~= "number" then
     local dark = (vim.o.background or ""):lower() ~= "light"
-    for i = 0, levels - 1 do
-      local t = i / (levels - 1)
-      -- On dark themes, higher t => brighter; on light themes, higher t => darker.
-      local c = dark and (240 + math.floor(t * 14 + 0.5)) or (252 - math.floor(t * 14 + 0.5))
-      vim.api.nvim_set_hl(0, "MeterMeterEOL" .. tostring(i), { ctermfg = c })
+    -- Create 3 tiers: 0 (dimmest), 1 (medium), 2 (brightest)
+    local blend_points = { 0.0, 0.5, 1.0 }
+    local dark_indices = { 240, 247, 254 }
+    local light_indices = { 252, 245, 238 }
+    local indices = dark and dark_indices or light_indices
+    for i = 0, 2 do
+      vim.api.nvim_set_hl(0, "MeterMeterEOL" .. tostring(i), { ctermfg = indices[i + 1] })
     end
     return
   end
 
-  for i = 0, levels - 1 do
-    local t = i / (levels - 1)
+  -- Create exactly 3 groups at fixed blend points: t=0.0, 0.5, 1.0
+  local blend_points = { 0.0, 0.5, 1.0 }
+  for i = 0, 2 do
+    local t = blend_points[i + 1]
     local fg = _blend_rgb(cfgc, nfg, t)
     vim.api.nvim_set_hl(0, "MeterMeterEOL" .. tostring(i), { fg = fg })
   end
 end
 
 local function eol_hl_for_conf(conf)
-  local levels = _clamp_levels()
   if type(conf) ~= "number" then
     return "MeterMeterEOL0"
   end
-  conf = math.max(0, math.min(1, conf))
-  local idx = math.floor(conf * (levels - 1) + 0.5)
-  return "MeterMeterEOL" .. tostring(idx)
+  if conf >= (cfg.ui.confident_threshold or 0.7) then
+    return "MeterMeterEOL2"
+  end
+  if conf >= (cfg.ui.uncertain_threshold or 0.4) then
+    return "MeterMeterEOL1"
+  end
+  return "MeterMeterEOL0"
 end
 
 local function _split_csv(s)
@@ -329,6 +333,90 @@ local function clear_buf(bufnr)
     return
   end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(bufnr, loading_ns, 0, -1)
+end
+
+local function _clear_loading(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(bufnr, loading_ns, 0, -1)
+end
+
+local function _refresh_loading(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  _clear_loading(bufnr)
+
+  local st = ensure_state(bufnr)
+  st.spinner_frame = (st.spinner_frame + 1) % #SPINNER
+  local spinner_char = SPINNER[st.spinner_frame + 1]
+
+  -- Determine the column alignment based on the widest visible line
+  -- (same logic as apply_results for meter hints)
+  local max_w = 0
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  for _, lnum in ipairs(st.pending_lnums or {}) do
+    if lnum >= 0 and lnum < line_count then
+      local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
+      local w = vim.fn.strdisplaywidth(text)
+      if type(w) == "number" and w > max_w then
+        max_w = w
+      end
+    end
+  end
+  local eol_col = max_w + 1
+
+  -- Clamp to window width
+  local wins = vim.fn.win_findbuf(bufnr)
+  if type(wins) == "table" then
+    for _, win in ipairs(wins) do
+      win = tonumber(win) or win
+      if type(win) == "number" and vim.api.nvim_win_is_valid(win) then
+        local ww = vim.api.nvim_win_get_width(win)
+        if type(ww) == "number" and ww > 1 then
+          eol_col = math.min(eol_col, ww - 1)
+        end
+        break
+      end
+    end
+  end
+
+  for _, lnum in ipairs(st.pending_lnums or {}) do
+    vim.api.nvim_buf_set_extmark(bufnr, loading_ns, lnum, 0, {
+      virt_text = { { " " .. spinner_char, "MeterMeterLoading" } },
+      virt_text_pos = "overlay",
+      virt_text_win_col = eol_col,
+    })
+  end
+
+  -- Start the per-buffer spinner timer if not running
+  if not st.loading_timer then
+    st.loading_timer = uv.new_timer()
+    st.loading_timer:start(100, 100, function()
+      vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          local st2 = state_by_buf[bufnr]
+          if st2 and #(st2.pending_lnums or {}) > 0 then
+            _refresh_loading(bufnr)
+          end
+        end
+      end)
+    end)
+  end
+end
+
+local function _stop_loading(bufnr)
+  local st = state_by_buf[bufnr]
+  if st then
+    if st.loading_timer then
+      st.loading_timer:stop()
+      st.loading_timer:close()
+      st.loading_timer = nil
+    end
+    _clear_loading(bufnr)
+  end
 end
 
 local function default_subprocess_cmd()
@@ -584,6 +672,25 @@ local function run_phase(bufnr, scan_generation, render_lines, lines, on_done)
       local results = merge_cache_and_results(bufnr, resp, render_lines)
       maybe_apply_results(bufnr, results)
     end
+
+    -- Remove lines just processed from pending
+    local processed = {}
+    for _, item in ipairs(req.lines or {}) do
+      processed[item.lnum] = true
+    end
+    local remaining = {}
+    for _, lnum in ipairs(st2.pending_lnums or {}) do
+      if not processed[lnum] then
+        remaining[#remaining + 1] = lnum
+      end
+    end
+    st2.pending_lnums = remaining
+    if #remaining > 0 and cfg.ui.loading_indicator then
+      _refresh_loading(bufnr)
+    else
+      _stop_loading(bufnr)
+    end
+
     if on_done then on_done() end
   end)
 end
@@ -631,6 +738,22 @@ local function do_scan(bufnr)
     return
   end
 
+  -- Compute uncached lines that still need analysis
+  local pending = {}
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  for _, lnum in ipairs(all_scan_lines) do
+    if lnum >= 0 and lnum < line_count then
+      local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
+      if not _cache_get(st, _cache_key_for_text(st, text)) then
+        pending[#pending + 1] = lnum
+      end
+    end
+  end
+  st.pending_lnums = pending
+  if cfg.ui.loading_indicator then
+    _refresh_loading(bufnr)
+  end
+
   local function finish_scan()
     local st2 = ensure_state(bufnr)
     if st2.scan_generation == gen then
@@ -665,6 +788,7 @@ local function cleanup_buf(bufnr)
   if not st then
     return
   end
+  _stop_loading(bufnr)
   state_mod.stop_scan_state(st)
   _cleanup_timers(st)
   clear_buf(bufnr)
@@ -723,6 +847,7 @@ function M.disable(bufnr)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
   st.enabled = false
+  _stop_loading(bufnr)
   state_mod.stop_scan_state(st)
   _cleanup_timers(st)
   clear_buf(bufnr)
