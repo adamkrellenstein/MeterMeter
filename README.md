@@ -143,12 +143,6 @@ For ad hoc annotation of non-`.poem` files, use `:MeterMeterToggle`.
 
 To restrict annotation to explicit poetry lines in mixed prose/code files:
 
-```lua
-require("metermeter").setup({ require_trailing_backslash = true })
-```
-
-Or without changing setup:
-
 ```vim
 let b:metermeter_require_trailing_backslash = 1
 ```
@@ -156,10 +150,6 @@ let b:metermeter_require_trailing_backslash = 1
 Lines ending with `\` are then the only ones annotated. Comment lines (per `&comments`/`&commentstring`) are always ignored.
 
 ## Configuration Reference
-
-```lua
-require("metermeter").setup({ ... })
-```
 
 | Option | Default | Description |
 |--------|---------|-------------|

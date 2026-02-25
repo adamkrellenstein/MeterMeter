@@ -12,3 +12,6 @@ __pycache__/
 *.sublime-workspace
 *.sublime-project
 .nvimlog
+
+research/
+.claude/
