@@ -26,9 +26,8 @@ local DEFAULTS = {
   ui = {
     stress = true,
     meter_hints = true,
-    confident_threshold = 0.7,   -- >= this: full brightness (MeterMeterEOL2)
-    uncertain_threshold = 0.4,   -- >= this: medium brightness (MeterMeterEOL1)
-    -- below uncertain_threshold => dimmest (MeterMeterEOL0, Comment color)
+    confident_threshold = 0.7,   -- >= this: bright (MeterMeterEOL1)
+    -- below confident_threshold => dim guess (MeterMeterEOL0)
     loading_indicator = true,
   },
 
@@ -126,7 +125,7 @@ local function _blend_rgb(a, b, t)
 end
 
 local function compute_eol_hls()
-  -- Three-tier confidence system: dimmest (free-verse), medium (uncertain), brightest (confident).
+  -- Two-tier confidence system: dim (low-confidence guess) and bright (confident).
   local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = true }) or {}
   local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = true }) or {}
   local nfg = normal.fg or normal.foreground
@@ -136,24 +135,21 @@ local function compute_eol_hls()
   -- If we don't have truecolor info, fall back to cterm greys.
   if type(nfg) ~= "number" or type(nbg) ~= "number" or type(cfgc) ~= "number" then
     local dark = (vim.o.background or ""):lower() ~= "light"
-    -- Create 3 tiers: 0 (dimmest), 1 (medium), 2 (brightest)
-    local blend_points = { 0.0, 0.5, 1.0 }
-    local dark_indices = { 240, 247, 254 }
-    local light_indices = { 252, 245, 238 }
+    -- Tier 0: extra dim (closer to background), Tier 1: bright (normal fg)
+    local dark_indices = { 238, 254 }
+    local light_indices = { 253, 238 }
     local indices = dark and dark_indices or light_indices
-    for i = 0, 2 do
+    for i = 0, 1 do
       vim.api.nvim_set_hl(0, "MeterMeterEOL" .. tostring(i), { ctermfg = indices[i + 1] })
     end
     return
   end
 
-  -- Create exactly 3 groups at fixed blend points: t=0.0, 0.5, 1.0
-  local blend_points = { 0.0, 0.5, 1.0 }
-  for i = 0, 2 do
-    local t = blend_points[i + 1]
-    local fg = _blend_rgb(cfgc, nfg, t)
-    vim.api.nvim_set_hl(0, "MeterMeterEOL" .. tostring(i), { fg = fg })
-  end
+  -- Tier 0: blend 20% from comment toward bg (dimmer than comment).
+  -- Tier 1: full normal fg (bright).
+  local dim_fg = _blend_rgb(cfgc, nbg, 0.3)
+  vim.api.nvim_set_hl(0, "MeterMeterEOL0", { fg = dim_fg })
+  vim.api.nvim_set_hl(0, "MeterMeterEOL1", { fg = nfg })
 end
 
 local function eol_hl_for_conf(conf)
@@ -161,9 +157,6 @@ local function eol_hl_for_conf(conf)
     return "MeterMeterEOL0"
   end
   if conf >= (cfg.ui.confident_threshold or 0.7) then
-    return "MeterMeterEOL2"
-  end
-  if conf >= (cfg.ui.uncertain_threshold or 0.4) then
     return "MeterMeterEOL1"
   end
   return "MeterMeterEOL0"
