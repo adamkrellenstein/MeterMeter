@@ -8,6 +8,53 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install StyLua
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/stylua.zip \
+            https://github.com/JohnnyMorganz/StyLua/releases/download/v2.0.2/stylua-linux-x86_64.zip
+          unzip -o /tmp/stylua.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/stylua
+
+      - name: Install Selene
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/selene.zip \
+            https://github.com/Kampfkarren/selene/releases/download/0.27.1/selene-0.27.1-linux.zip
+          unzip -o /tmp/selene.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/selene
+
+      - name: Install Neovim
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/nvim.tar.gz \
+            https://github.com/neovim/neovim/releases/download/v0.10.2/nvim-linux64.tar.gz
+          tar -C /tmp -xzf /tmp/nvim.tar.gz
+          echo "/tmp/nvim-linux64/bin" >> "$GITHUB_PATH"
+
+      - name: StyLua check
+        run: stylua --check nvim/metermeter.nvim/
+
+      - name: Selene check
+        run: selene nvim/metermeter.nvim/
+
+      - name: Vimdoc tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          nvim --headless -u NONE +"helptags nvim/metermeter.nvim/doc" +qa
+          git diff --exit-code nvim/metermeter.nvim/doc/tags
+
   test:
     name: tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

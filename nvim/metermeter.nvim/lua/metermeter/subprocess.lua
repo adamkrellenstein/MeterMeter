@@ -9,7 +9,7 @@ local proc = nil
 local stdin_pipe = nil
 local stdout_pipe = nil
 local stderr_pipe = nil
-local pending = {}   -- id -> callback
+local pending = {} -- id -> callback
 local next_id = 1
 local stdout_buf = ""
 local stderr_buf = ""
@@ -32,7 +32,9 @@ local function _fail_all_pending(err)
   local cbs = pending
   pending = {}
   for _, cb in pairs(cbs) do
-    vim.schedule(function() cb(nil, err) end)
+    vim.schedule(function()
+      cb(nil, err)
+    end)
   end
 end
 
@@ -43,11 +45,15 @@ local function _on_stderr_data(data)
 end
 
 local function _on_stdout_data(data)
-  if not data then return end
+  if not data then
+    return
+  end
   stdout_buf = stdout_buf .. data
   while true do
     local nl = stdout_buf:find("\n", 1, true)
-    if not nl then break end
+    if not nl then
+      break
+    end
     local line = stdout_buf:sub(1, nl - 1)
     stdout_buf = stdout_buf:sub(nl + 1)
     if line ~= "" then
@@ -56,14 +62,16 @@ local function _on_stdout_data(data)
         local cb = pending[obj.id]
         if cb then
           pending[obj.id] = nil
-          vim.schedule(function() cb(obj, nil) end)
+          vim.schedule(function()
+            cb(obj, nil)
+          end)
         end
       end
     end
   end
 end
 
-local function _on_exit(code, signal)
+local function _on_exit(code, _signal)
   proc = nil
   stdin_pipe = nil
   stdout_pipe = nil
@@ -78,6 +86,9 @@ local function _on_exit(code, signal)
     stderr_buf = ""
   end
   stdout_buf = ""
+  if code and code ~= 0 then
+    vim.notify("MeterMeter: " .. err, vim.log.levels.WARN)
+  end
   _fail_all_pending(err)
 end
 
@@ -98,7 +109,9 @@ function M.ensure_running(cmd)
     args = { unpack(cmd, 2) },
     stdio = { stdin_pipe, stdout_pipe, stderr_pipe },
   }, function(code, signal)
-    vim.schedule(function() _on_exit(code, signal) end)
+    vim.schedule(function()
+      _on_exit(code, signal)
+    end)
   end)
 
   if not handle then
@@ -115,12 +128,16 @@ function M.ensure_running(cmd)
   proc = handle
 
   uv.read_start(stdout_pipe, function(read_err, data)
-    if read_err then return end
+    if read_err then
+      return
+    end
     _on_stdout_data(data)
   end)
 
   uv.read_start(stderr_pipe, function(read_err, data)
-    if read_err then return end
+    if read_err then
+      return
+    end
     _on_stderr_data(data)
   end)
 
@@ -139,14 +156,18 @@ function M.send(request, callback)
       local cb = pending[id]
       if cb then
         pending[id] = nil
-        vim.schedule(function() cb(nil, "subprocess write error: " .. tostring(write_err)) end)
+        vim.schedule(function()
+          cb(nil, "subprocess write error: " .. tostring(write_err))
+        end)
       end
     end
   end)
 end
 
 function M.shutdown()
-  if proc == nil then return end
+  if proc == nil then
+    return
+  end
   pcall(function()
     uv.write(stdin_pipe, vim.json.encode({ shutdown = true }) .. "\n")
   end)

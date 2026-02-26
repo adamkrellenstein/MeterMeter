@@ -109,12 +109,15 @@ function M.viewport_signature(bufnr)
       end)
       local cur = vim.api.nvim_win_get_cursor(win)
       local ww = vim.api.nvim_win_get_width(win)
-      table.insert(parts, table.concat({
-        tostring(w0),
-        tostring(w1),
-        tostring(cur and cur[1] or 0),
-        tostring(ww or 0),
-      }, ":"))
+      table.insert(
+        parts,
+        table.concat({
+          tostring(w0),
+          tostring(w1),
+          tostring(cur and cur[1] or 0),
+          tostring(ww or 0),
+        }, ":")
+      )
     end
   end
   table.sort(parts)

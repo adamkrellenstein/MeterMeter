@@ -1,0 +1,240 @@
+*metermeter.txt*        Local, real-time poetic meter annotation for Neovim
+
+Author:   Adam Krellenstein
+License:  MIT
+Requires: Neovim >= 0.10
+
+==============================================================================
+INTRODUCTION                                            *metermeter*
+
+MeterMeter provides real-time poetic meter annotation in Neovim. It uses a
+persistent Python subprocess to analyze lines, showing stress highlighting
+and meter labels (e.g. "iambic pentameter") as virtual text.
+
+Scanning is progressive: visible lines first, nearby prefetch lines next,
+then remaining scannable lines across the buffer. Cached results are reused
+for unchanged lines.
+
+==============================================================================
+REQUIREMENTS                                            *metermeter-requirements*
+
+- Neovim 0.10+
+- Python 3.11+
+- `prosodic` Python package (installed in the project venv)
+- `espeak` (optional, used by prosodic for out-of-vocabulary words)
+
+==============================================================================
+INSTALLATION                                            *metermeter-install*
+
+lazy.nvim: >lua
+    {
+      dir = "~/dev/MeterMeter/nvim/metermeter.nvim",
+      ft = "metermeter",
+      cmd = { "MeterMeterToggle", "MeterMeterEnable", "MeterMeterRescan" },
+      keys = {
+        { "<leader>mm", "<Plug>(metermeter-toggle)", desc = "Toggle MeterMeter" },
+      },
+      config = function()
+        require("metermeter").setup()
+      end,
+    }
+<
+vim-plug: >vim
+    Plug '~/dev/MeterMeter/nvim/metermeter.nvim'
+<
+
+==============================================================================
+CONFIGURATION                                           *metermeter-config*
+
+Pass a table to `setup()` to override defaults: >lua
+    require("metermeter").setup({
+      debounce_ms = 100,
+      ui = { stress = true, meter_hints = true },
+    })
+<
+
+                                                *metermeter.debounce_ms*
+debounce_ms ~
+    Delay (ms) after edits before rescanning.
+    Default: `80`
+
+                                                *metermeter.rescan_interval_ms*
+rescan_interval_ms ~
+    Periodic rescan interval (ms). `0` disables.
+    Default: `0`
+
+                                                *metermeter.prefetch_lines*
+prefetch_lines ~
+    Lines scanned around cursor beyond visible range.
+    Default: `5`
+
+                                                *metermeter.require_trailing_backslash*
+require_trailing_backslash ~
+    Only annotate lines ending with `\`.
+    Default: `false`
+
+                                                *metermeter.ui.stress*
+ui.stress ~
+    Enable stress span highlighting.
+    Default: `true`
+
+                                                *metermeter.ui.meter_hints*
+ui.meter_hints ~
+    Show meter label at end of line.
+    Default: `true`
+
+                                                *metermeter.ui.confident_threshold*
+ui.confident_threshold ~
+    Confidence >= this uses bright highlight; below uses dim.
+    Default: `0.7`
+
+                                                *metermeter.ui.loading_indicator*
+ui.loading_indicator ~
+    Show spinner on lines being analyzed.
+    Default: `true`
+
+                                                *metermeter.cache.max_entries*
+cache.max_entries ~
+    Per-buffer LRU cache capacity.
+    Default: `5000`
+
+                                                *metermeter.debug_dump_path*
+debug_dump_path ~
+    Output path for |:MeterMeterDebug|.
+    Default: `"/tmp/metermeter_nvim_dump.json"`
+
+==============================================================================
+COMMANDS                                                *metermeter-commands*
+
+                                                *:MeterMeterToggle*
+:MeterMeterToggle       Toggle MeterMeter for the current buffer.
+
+                                                *:MeterMeterEnable*
+:MeterMeterEnable       Enable MeterMeter for the current buffer.
+
+                                                *:MeterMeterDisable*
+:MeterMeterDisable      Disable MeterMeter for the current buffer.
+
+                                                *:MeterMeterRescan*
+:MeterMeterRescan       Invalidate cache and re-analyze the buffer.
+
+                                                *:MeterMeterDebug*
+:MeterMeterDebug        Print a summary and write full state JSON to
+                        |metermeter.debug_dump_path|.
+
+                                                *:MeterMeterStatus*
+:MeterMeterStatus       Show the current statusline value via |vim.notify()|.
+
+==============================================================================
+LUA API                                                 *metermeter-api*
+
+All functions are available via `require("metermeter")`.
+
+                                                *metermeter.setup()*
+setup({opts})           Initialize the plugin with optional config overrides.
+                        Must be called before any other function.
+
+                                                *metermeter.enable()*
+enable({bufnr})         Enable MeterMeter for the given buffer.
+                        Pass `0` for the current buffer.
+
+                                                *metermeter.disable()*
+disable({bufnr})        Disable MeterMeter for the given buffer.
+
+                                                *metermeter.toggle()*
+toggle({bufnr})         Toggle MeterMeter for the given buffer.
+
+                                                *metermeter.rescan()*
+rescan({bufnr})         Invalidate the cache and re-analyze the buffer.
+
+                                                *metermeter.statusline()*
+statusline({bufnr})     Return a string for statusline integration.
+                        Shows "MM: iambic pentameter" when active,
+                        "MM: ..." while scanning, or error info on failure.
+
+==============================================================================
+MAPPINGS                                                *metermeter-mappings*
+
+MeterMeter provides <Plug> mappings for user key customization:
+
+                                                *<Plug>(metermeter-toggle)*
+<Plug>(metermeter-toggle)       Toggle MeterMeter for the current buffer.
+
+                                                *<Plug>(metermeter-rescan)*
+<Plug>(metermeter-rescan)       Invalidate cache and re-analyze.
+
+                                                *<Plug>(metermeter-enable)*
+<Plug>(metermeter-enable)       Enable MeterMeter for the current buffer.
+
+                                                *<Plug>(metermeter-disable)*
+<Plug>(metermeter-disable)      Disable MeterMeter for the current buffer.
+
+Example mapping: >lua
+    vim.keymap.set("n", "<leader>mm", "<Plug>(metermeter-toggle)")
+<
+
+==============================================================================
+HIGHLIGHT GROUPS                                        *metermeter-highlights*
+
+                                                *hl-MeterMeterStress*
+MeterMeterStress        Bold overlay on stressed syllables.
+                        Default: `{ bold = true }`
+
+                                                *hl-MeterMeterEOL0*
+MeterMeterEOL0          Dim end-of-line meter hint (low confidence).
+
+                                                *hl-MeterMeterEOL1*
+MeterMeterEOL1          Bright end-of-line meter hint (high confidence).
+
+                                                *hl-MeterMeterLoading*
+MeterMeterLoading       Spinner shown on lines being analyzed.
+                        Default: links to `Comment`.
+
+==============================================================================
+STATUSLINE                                              *metermeter-statusline*
+
+MeterMeter injects into the statusline automatically. If lualine is
+installed, it adds a component to `lualine_x`. Otherwise, it patches the
+statusline of each MeterMeter window directly.
+
+For manual integration: >lua
+    require("lualine").setup({
+      sections = {
+        lualine_x = { function() return require("metermeter").statusline() end },
+      },
+    })
+<
+
+==============================================================================
+HEALTH CHECK                                            *metermeter-health*
+
+Run `:checkhealth metermeter` to verify your setup. It checks:
+- Neovim version (>= 0.10)
+- Python version (>= 3.11)
+- `prosodic` importability
+- `espeak` availability
+- Subprocess status
+- Whether `setup()` has been called
+
+==============================================================================
+TROUBLESHOOTING                                         *metermeter-troubleshooting*
+
+No annotations appear ~
+    Check that `&filetype` includes "metermeter" and that the statusline
+    shows "MM: ..." or a meter name. Use `:MeterMeterToggle` to force-enable
+    on any buffer.
+
+Unexpected highlights ~
+    Run `:MeterMeterDebug` and inspect the JSON at |metermeter.debug_dump_path|.
+
+espeak warnings ~
+    Install espeak: `brew install espeak` (macOS) / `apt install espeak`
+    (Linux). Without it, OOV words use a neural heuristic which may be
+    slower or less accurate.
+
+Subprocess crashes ~
+    Check `:MeterMeterDebug` for error details. The subprocess restarts
+    automatically up to 3 times per minute.
+
+==============================================================================
+ vim:tw=78:ft=help:norl:

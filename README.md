@@ -1,5 +1,9 @@
 # MeterMeter
 
+![CI](https://github.com/adamkrellenstein/MeterMeter/actions/workflows/ci.yml/badge.svg)
+![Neovim](https://img.shields.io/badge/Neovim-0.10%2B-green?logo=neovim)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
 Local, real-time poetic meter annotation for Neovim.
 
 This repository is Neovim-first. Plugin code lives in `nvim/metermeter.nvim/`.
@@ -100,6 +104,11 @@ The remaining gap to high-performing learned systems is mostly context-dependent
 ```lua
 {
   dir = "~/dev/MeterMeter/nvim/metermeter.nvim",
+  ft = "metermeter",
+  cmd = { "MeterMeterToggle", "MeterMeterEnable", "MeterMeterRescan" },
+  keys = {
+    { "<leader>mm", "<Plug>(metermeter-toggle)", desc = "Toggle MeterMeter" },
+  },
   config = function()
     require("metermeter").setup()
   end,
@@ -120,9 +129,11 @@ set termguicolors
 
 ## Usage
 
-- `:MeterMeterToggle`
+- `:MeterMeterToggle` — toggle annotation for the current buffer
+- `:MeterMeterEnable` / `:MeterMeterDisable` — explicit enable/disable
 - `:MeterMeterRescan` — invalidates cache and re-analyzes the whole buffer from scratch
 - `:MeterMeterDebug` — prints a one-line summary (works even when disabled) and writes full state JSON to `debug_dump_path`
+- `:MeterMeterStatus` — show current statusline value
 
 ### Statusline
 
