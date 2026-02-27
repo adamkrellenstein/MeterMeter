@@ -3,8 +3,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+PYTHON="${ROOT}/.venv/bin/python3"
+if [[ ! -x "${PYTHON}" ]]; then
+  PYTHON="python3"
+fi
+
 echo "[check] python compile"
-python3 -m compileall -q "${ROOT}/nvim/metermeter.nvim/python" "${ROOT}/tests"
+"${PYTHON}" -m compileall -q "${ROOT}/nvim/metermeter.nvim/python" "${ROOT}/tests"
 
 echo "[check] lua load"
 nvim --headless -u NONE -i NONE \

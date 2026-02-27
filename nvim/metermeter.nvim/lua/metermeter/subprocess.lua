@@ -18,6 +18,37 @@ local restart_count = 0
 local restart_window_start = 0
 local MAX_RESTARTS = 3
 local RESTART_WINDOW_S = 60
+local MAX_STDOUT_BYTES = 512 * 1024
+local MAX_STDERR_BYTES = 16 * 1024
+
+local function _cap_tail(buf, max_bytes)
+  if not buf or buf == "" then
+    return ""
+  end
+  if #buf <= max_bytes then
+    return buf
+  end
+  return buf:sub(-max_bytes)
+end
+
+local function _stop_read_and_close(pipe)
+  if not pipe then
+    return
+  end
+  pcall(uv.read_stop, pipe)
+  if not pipe:is_closing() then
+    pipe:close()
+  end
+end
+
+local function _close_handle(handle)
+  if not handle then
+    return
+  end
+  if not handle:is_closing() then
+    handle:close()
+  end
+end
 
 local function _can_restart()
   local now = uv.now() / 1000
@@ -40,7 +71,7 @@ end
 
 local function _on_stderr_data(data)
   if data then
-    stderr_buf = stderr_buf .. data
+    stderr_buf = _cap_tail(stderr_buf .. data, MAX_STDERR_BYTES)
   end
 end
 
@@ -48,7 +79,7 @@ local function _on_stdout_data(data)
   if not data then
     return
   end
-  stdout_buf = stdout_buf .. data
+  stdout_buf = _cap_tail(stdout_buf .. data, MAX_STDOUT_BYTES)
   while true do
     local nl = stdout_buf:find("\n", 1, true)
     if not nl then
@@ -72,10 +103,21 @@ local function _on_stdout_data(data)
 end
 
 local function _on_exit(code, _signal)
+  local old_proc = proc
+  local old_stdin = stdin_pipe
+  local old_stdout = stdout_pipe
+  local old_stderr = stderr_pipe
+
   proc = nil
   stdin_pipe = nil
   stdout_pipe = nil
   stderr_pipe = nil
+
+  _stop_read_and_close(old_stdout)
+  _stop_read_and_close(old_stderr)
+  _stop_read_and_close(old_stdin)
+  _close_handle(old_proc)
+
   local err = "metermeter subprocess exited"
   if code and code ~= 0 then
     err = err .. " (code " .. tostring(code) .. ")"
@@ -145,13 +187,20 @@ function M.ensure_running(cmd)
 end
 
 function M.send(request, callback)
+  if not proc or not stdin_pipe or stdin_pipe:is_closing() then
+    vim.schedule(function()
+      callback(nil, "subprocess not running")
+    end)
+    return
+  end
+
   local id = next_id
   next_id = next_id + 1
   request.id = id
   pending[id] = callback
 
   local line = vim.json.encode(request) .. "\n"
-  uv.write(stdin_pipe, line, function(write_err)
+  local ok = pcall(uv.write, stdin_pipe, line, function(write_err)
     if write_err then
       local cb = pending[id]
       if cb then
@@ -162,6 +211,15 @@ function M.send(request, callback)
       end
     end
   end)
+  if not ok then
+    local cb = pending[id]
+    if cb then
+      pending[id] = nil
+      vim.schedule(function()
+        cb(nil, "subprocess write error: failed to write")
+      end)
+    end
+  end
 end
 
 function M.shutdown()
@@ -169,7 +227,9 @@ function M.shutdown()
     return
   end
   pcall(function()
-    uv.write(stdin_pipe, vim.json.encode({ shutdown = true }) .. "\n")
+    if stdin_pipe and not stdin_pipe:is_closing() then
+      uv.write(stdin_pipe, vim.json.encode({ shutdown = true }) .. "\n")
+    end
   end)
   vim.defer_fn(function()
     if proc then

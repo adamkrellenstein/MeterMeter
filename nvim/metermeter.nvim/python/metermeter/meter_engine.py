@@ -4,7 +4,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import prosodic
 
-TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+# Match Unicode letter tokens, allowing a single internal apostrophe (straight or curly).
+# - `\w` includes letters, digits, and underscore in Unicode mode.
+# - `[^\W\d_]` narrows that to letters (exclude non-word, digits, underscore).
+TOKEN_RE = re.compile(r"[^\W\d_]+(?:['’][^\W\d_]+)?")
 
 # Monosyllabic function words: default to unstressed in metrical context.
 # Based on Groves' rules (used by ZeuScansion) and the Scandroid's dictionary.
@@ -612,7 +615,7 @@ class MeterEngine:
                 token_end = max(token_start + 1, min(line_char_len, token_start + max(1, len(raw_word_l))))
                 token_text = line[token_start:token_end]
 
-            word_text = token_text.strip().lower().strip("'")
+            word_text = token_text.strip().lower().replace("’", "'").strip("'")
             is_mono = len(syls) == 1
             syllable_texts = [str(getattr(syl, "txt", "") or "").lower() for syl in syls]
             syllable_spans = self._align_syllables_in_token(line, token_start, token_end, syllable_texts)

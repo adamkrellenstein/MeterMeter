@@ -7,6 +7,14 @@ on:
       - neovim
   pull_request:
 
+env:
+  STYLUA_VERSION: "v2.0.2"
+  STYLUA_LINUX_SHA256: "ee9f8f9ba7c19079809d017a5d3f265a9575d1313c0fd24562cbabb99ed26f4f"
+  SELENE_VERSION: "0.27.1"
+  SELENE_LINUX_SHA256: "22dabfe070c6d10cbb0b8ae56a82abfa131fbb902bff03d9924f0f73fd3d3318"
+  NEOVIM_VERSION: "v0.10.2"
+  NEOVIM_LINUX64_TARGZ_SHA256: "9f696e635d503b844e4e78e88a22bcf512a78f288bf471379afc3d0004e15217"
+
 jobs:
   lint:
     name: lint
@@ -19,8 +27,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/stylua.zip \
-            https://github.com/JohnnyMorganz/StyLua/releases/download/v2.0.2/stylua-linux-x86_64.zip
+          curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/stylua.zip \
+            "https://github.com/JohnnyMorganz/StyLua/releases/download/${STYLUA_VERSION}/stylua-linux-x86_64.zip"
+          echo "${STYLUA_LINUX_SHA256}  /tmp/stylua.zip" | sha256sum -c -
           unzip -o /tmp/stylua.zip -d /usr/local/bin
           chmod +x /usr/local/bin/stylua
 
@@ -28,8 +37,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/selene.zip \
-            https://github.com/Kampfkarren/selene/releases/download/0.27.1/selene-0.27.1-linux.zip
+          curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/selene.zip \
+            "https://github.com/Kampfkarren/selene/releases/download/${SELENE_VERSION}/selene-${SELENE_VERSION}-linux.zip"
+          echo "${SELENE_LINUX_SHA256}  /tmp/selene.zip" | sha256sum -c -
           unzip -o /tmp/selene.zip -d /usr/local/bin
           chmod +x /usr/local/bin/selene
 
@@ -37,9 +47,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/nvim.tar.gz \
-            https://github.com/neovim/neovim/releases/download/v0.10.2/nvim-linux64.tar.gz
-          tar -C /tmp -xzf /tmp/nvim.tar.gz
+          curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/nvim-linux64.tar.gz \
+            "https://github.com/neovim/neovim/releases/download/${NEOVIM_VERSION}/nvim-linux64.tar.gz"
+          echo "${NEOVIM_LINUX64_TARGZ_SHA256}  /tmp/nvim-linux64.tar.gz" | sha256sum -c -
+          tar -C /tmp -xzf /tmp/nvim-linux64.tar.gz
           echo "/tmp/nvim-linux64/bin" >> "$GITHUB_PATH"
 
       - name: StyLua check
@@ -62,6 +73,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.14"]
 
     steps:
       - name: Checkout
@@ -70,7 +82,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -85,9 +97,10 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq espeak libespeak1 libespeak-dev
-          curl -fsSL -o /tmp/nvim.tar.gz \
-            https://github.com/neovim/neovim/releases/download/v0.10.2/nvim-linux64.tar.gz
-          tar -C /tmp -xzf /tmp/nvim.tar.gz
+          curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/nvim-linux64.tar.gz \
+            "https://github.com/neovim/neovim/releases/download/${NEOVIM_VERSION}/nvim-linux64.tar.gz"
+          echo "${NEOVIM_LINUX64_TARGZ_SHA256}  /tmp/nvim-linux64.tar.gz" | sha256sum -c -
+          tar -C /tmp -xzf /tmp/nvim-linux64.tar.gz
           echo "/tmp/nvim-linux64/bin" >> "$GITHUB_PATH"
 
       - name: Install system deps (macOS)
@@ -97,13 +110,6 @@ jobs:
           set -euo pipefail
           brew update
           brew install neovim espeak
-
-      - name: Fetch 4B4V benchmark corpus
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone --depth 1 https://github.com/waynegraham/for_better_for_verse /tmp/4b4v
-          cp -r /tmp/4b4v/poems benchmarks/data/poems
 
       - name: Run tests
         shell: bash

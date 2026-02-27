@@ -93,6 +93,15 @@ class EngineEdgeCaseTests(unittest.TestCase):
     def test_tokenize_punctuation_only(self) -> None:
         self.assertEqual(self.engine.tokenize("...---!!!"), [])
 
+    def test_tokenize_unicode_words(self) -> None:
+        self.assertEqual(self.engine.tokenize("café naïve façade"), ["café", "naïve", "façade"])
+
+    def test_tokenize_curly_apostrophes(self) -> None:
+        self.assertEqual(self.engine.tokenize("I can’t believe it’s done"), ["I", "can’t", "believe", "it’s", "done"])
+
+    def test_tokenize_leading_curly_apostrophe(self) -> None:
+        self.assertEqual(self.engine.tokenize("’tis the season"), ["tis", "the", "season"])
+
     def test_stress_pattern_length_matches_syllable_positions(self) -> None:
         lines = [
             "Shall I compare thee to a summer's day?",
