@@ -77,6 +77,7 @@ def _analyze_line(engine: MeterEngine, item: dict, context: Optional[Dict[str, A
         "text": a.source_text,
         "meter_name": a.meter_name,
         "confidence": float(a.confidence),
+        "meter_features": engine.meter_features_for(a.meter_name, a.stress_pattern),
         "stress_spans": spans,
     }
 

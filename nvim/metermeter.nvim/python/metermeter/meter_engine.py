@@ -148,6 +148,59 @@ class MeterEngine:
     def tokenize(self, line: str) -> List[str]:
         return TOKEN_RE.findall(line)
 
+    def meter_features_for(self, meter_name: str, stress_pattern: str) -> Dict[str, Any]:
+        """Compute lightweight scansion notes from (meter_name, stress_pattern).
+
+        This is intentionally simple (binary meters only) and is used to power
+        Neovim end-of-line hint annotations like feminine endings and inversions.
+        """
+        out: Dict[str, Any] = {
+            "ending": "unknown",  # "masc" | "fem" | "unknown"
+            "inversion": False,
+            "initial_inversion": False,
+            "spondee": False,
+            "pyrrhic": False,
+        }
+
+        parsed = self._parse_meter_name(meter_name)
+        if parsed is None:
+            return out
+        foot_name, feet = parsed
+        if foot_name not in {"iambic", "trochaic"}:
+            return out
+
+        if not isinstance(stress_pattern, str) or not stress_pattern:
+            return out
+
+        expected_len = len(FOOT_TEMPLATES[foot_name]) * int(feet)
+        base = stress_pattern
+        if len(stress_pattern) == expected_len + 1 and stress_pattern.endswith("U"):
+            out["ending"] = "fem"
+            base = stress_pattern[:-1]
+        elif len(stress_pattern) == expected_len:
+            out["ending"] = "masc"
+        else:
+            return out
+
+        if len(base) != expected_len:
+            return out
+
+        expected_foot = FOOT_TEMPLATES[foot_name]
+        inverted_foot = expected_foot[::-1]
+
+        for foot_idx in range(int(feet)):
+            seg = base[2 * foot_idx : 2 * foot_idx + 2]
+            if seg == inverted_foot:
+                out["inversion"] = True
+                if foot_idx == 0:
+                    out["initial_inversion"] = True
+            elif seg == "SS":
+                out["spondee"] = True
+            elif seg == "UU":
+                out["pyrrhic"] = True
+
+        return out
+
     # -- Deterministic scoring helpers (API compatibility) --
 
     def _parse_meter_name(self, meter_name: str) -> Optional[Tuple[str, int]]:

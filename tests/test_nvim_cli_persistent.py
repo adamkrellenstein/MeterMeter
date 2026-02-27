@@ -46,13 +46,16 @@ class PersistentProtocolTests(unittest.TestCase):
         self.assertEqual(len(resp["results"]), len(self.LINES))
 
     def test_response_has_required_fields(self) -> None:
-        """Each result has lnum, text, meter_name, confidence, stress_spans."""
+        """Each result has lnum, text, meter_name, confidence, meter_features, stress_spans."""
         resps = _run_persistent([{"id": 7, "lines": self.LINES[:1]}])
         result = resps[0]["results"][0]
         self.assertIn("lnum", result)
         self.assertIn("text", result)
         self.assertIn("meter_name", result)
         self.assertIn("confidence", result)
+        self.assertIn("meter_features", result)
+        self.assertIsInstance(result["meter_features"], dict)
+        self.assertIn("ending", result["meter_features"])
         self.assertIn("stress_spans", result)
 
     def test_multiple_requests_in_sequence(self) -> None:

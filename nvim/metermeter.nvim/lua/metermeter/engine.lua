@@ -2,6 +2,7 @@ local uv = vim.uv or vim.loop
 local config = require("metermeter.config")
 local cache = require("metermeter.cache")
 local filter = require("metermeter.filter")
+local labels = require("metermeter.labels")
 local render = require("metermeter.render")
 local scanner = require("metermeter.scanner")
 local subprocess = require("metermeter.subprocess")
@@ -83,6 +84,7 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines, state_by_buf)
         meter_name = item.meter_name or "",
         confidence = item.confidence,
         stress_spans = item.stress_spans or {},
+        meter_features = type(item.meter_features) == "table" and item.meter_features or nil,
       })
     end
   end
@@ -108,6 +110,7 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines, state_by_buf)
             meter_name = cached.meter_name or "",
             confidence = cached.confidence,
             stress_spans = cached.stress_spans or {},
+            meter_features = cached.meter_features,
           })
         end
       end
@@ -154,7 +157,7 @@ local function maybe_apply_results(bufnr, results, state_by_buf)
   -- and result count haven't changed.
   local parts = {}
   for _, item in ipairs(results or {}) do
-    parts[#parts + 1] = tostring(item.lnum) .. "=" .. (item.meter_name or "")
+    parts[#parts + 1] = tostring(item.lnum) .. "=" .. labels.meter_hint(item)
   end
   local sig = table.concat(parts, ",")
   if sig == (st.last_render_sig or "") then

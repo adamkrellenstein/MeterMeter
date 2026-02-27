@@ -170,6 +170,7 @@ Lines ending with `\` are then the only ones annotated. Comment lines (per `&com
 | `require_trailing_backslash` | `false` | Only annotate lines ending with `\`. |
 | `ui.stress` | `true` | Enable stress span highlighting. |
 | `ui.meter_hints` | `true` | Show meter label at end of line. |
+| `ui.meter_hint_details` | `"deviations"` | Hint detail level: `"off"`, `"deviations"` (only feminine endings/substitutions), or `"always"` (always show masc/fem + substitutions). |
 | `ui.confident_threshold` | `0.7` | Confidence >= this is bright; below is dim. |
 | `cache.max_entries` | `5000` | Per-buffer LRU cache capacity. |
 | `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path for `:MeterMeterDebug`. |
@@ -218,7 +219,7 @@ The Neovim layer communicates with the Python subprocess via newline-delimited J
 
 **Response (Python → Lua):**
 ```json
-{"id": 1, "results": [{"lnum": 0, "text": "Shall I compare thee to a summer's day?", "meter_name": "iambic pentameter", "confidence": 0.9, "stress_spans": [[9, 12], [24, 28]]}], "eval": {"line_count": 1, "result_count": 1}}
+{"id": 1, "results": [{"lnum": 0, "text": "Shall I compare thee to a summer's day?", "meter_name": "iambic pentameter", "confidence": 0.9, "meter_features": {"ending": "masc", "inversion": false, "initial_inversion": false, "spondee": false, "pyrrhic": false}, "stress_spans": [[9, 12], [24, 28]]}], "eval": {"line_count": 1, "result_count": 1}}
 ```
 
 The `id` is echoed in the response so Lua can match responses to callbacks (requests and responses may interleave). Shutdown: `{"shutdown": true}` causes the subprocess to exit cleanly.

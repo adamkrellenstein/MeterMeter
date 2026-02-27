@@ -8,6 +8,11 @@ local DEFAULTS = {
   ui = {
     stress = true,
     meter_hints = true,
+    -- "off" | "deviations" | "always"
+    -- - off: show only meter_name
+    -- - deviations: show only non-default notes (e.g. feminine ending, inversions, spondees)
+    -- - always: always show ending (masc/fem) plus any substitutions
+    meter_hint_details = "deviations",
     confident_threshold = 0.7, -- >= this: bright (MeterMeterEOL1)
     -- below confident_threshold => dim guess (MeterMeterEOL0)
     loading_indicator = true,

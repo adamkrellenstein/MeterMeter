@@ -1,6 +1,7 @@
 local uv = vim.uv or vim.loop
 local config = require("metermeter.config")
 local highlight = require("metermeter.highlight")
+local labels = require("metermeter.labels")
 
 local M = {}
 
@@ -139,11 +140,8 @@ function M.apply_results(bufnr, results)
   for _, item in ipairs(results) do
     local lnum = tonumber(item.lnum)
     if lnum and vim.api.nvim_buf_is_valid(bufnr) then
-      local label = item.label or ""
       local conf = item.confidence
-      if type(conf) == "number" then
-        label = tostring(item.meter_name or label or "")
-      end
+      local label = labels.meter_hint(item)
       if cfg.ui.meter_hints and label ~= "" then
         local hl = highlight.eol_hl_for_conf(conf)
         vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, 0, {
