@@ -139,6 +139,23 @@ set termguicolors
 
 MeterMeter shows the dominant meter in the statusline automatically — no configuration needed. If lualine is installed it injects into `lualine_x`; otherwise it patches the statusline of each metermeter window directly. The meter shows as `MM: iambic pentameter` when active, `MM: …` while the first scan runs, or an error summary on failure.
 
+### Meter hint notes
+
+When `ui.meter_hints` is enabled, the end-of-line meter label may include short notes in parentheses:
+
+- `fem` — feminine ending (extra trailing unstressed syllable)
+- `inv` — inverted binary foot (e.g. initial trochee in iambic meter)
+- `spon` — spondee substitution (`SS`)
+- `pyrr` — pyrrhic substitution (`UU`)
+
+Control this with `ui.meter_hint_details`:
+
+- `"off"`: show only the meter name
+- `"deviations"` (default): show notes only when present
+- `"always"`: always show ending (`masc`/`fem`) plus any substitutions
+
+Notes are currently emitted for iambic/trochaic meters only (anapestic/dactylic hints remain meter-name only).
+
 ## File Enable Rules
 
 MeterMeter enables itself when `&filetype` includes `metermeter`.

@@ -80,8 +80,29 @@ ui.stress ~
 
                                                 *metermeter.ui.meter_hints*
 ui.meter_hints ~
-    Show meter label at end of line.
+    Show meter label at end of line (optionally with notes like "(fem, inv)";
+    see |metermeter.ui.meter_hint_details|).
     Default: `true`
+
+                                                *metermeter.ui.meter_hint_details*
+ui.meter_hint_details ~
+    Controls how much detail is shown in the end-of-line meter hint.
+
+    Values: `"off"` | `"deviations"` | `"always"`
+    - `"off"`: show only the meter name
+    - `"deviations"`: show only non-default notes (e.g. feminine endings and
+      binary-meter substitutions like inversions/spondees/pyrrhics)
+    - `"always"`: always show ending (`masc`/`fem`) plus any substitutions
+
+    Notes:
+    - `fem`: feminine ending (extra trailing `U`)
+    - `inv`: inverted binary foot (`SU` in iambic, `US` in trochaic)
+    - `spon`: spondee (`SS`)
+    - `pyrr`: pyrrhic (`UU`)
+
+    Notes are currently emitted for iambic/trochaic meters only.
+
+    Default: `"deviations"`
 
                                                 *metermeter.ui.confident_threshold*
 ui.confident_threshold ~

@@ -9,6 +9,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - Health check: `:checkhealth metermeter`
 - Vimdoc: `:help metermeter`
+- Meter hint notes for feminine endings and substitutions (`fem`/`inv`/`spon`/`pyrr`, via `ui.meter_hint_details`)
 - `<Plug>` mappings: `(metermeter-toggle)`, `(metermeter-rescan)`, `(metermeter-enable)`, `(metermeter-disable)`
 - Commands: `:MeterMeterEnable`, `:MeterMeterDisable`, `:MeterMeterStatus`
 - Neovim 0.10+ version guard in `setup()`
