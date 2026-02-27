@@ -101,6 +101,9 @@ function M.enable(bufnr, user)
     st.user_enabled = true
   end
   st.enabled = true
+  st.cache_epoch = (tonumber(st.cache_epoch) or 0) + 1
+  st.cache = {}
+  st.cache_size = 0
   st.last_changedtick = -1
   st.last_view_sig = ""
   engine.refresh_statusline()
@@ -117,6 +120,9 @@ function M.disable(bufnr, user)
     st.user_enabled = false
   end
   st.enabled = false
+  st.cache_epoch = (tonumber(st.cache_epoch) or 0) + 1
+  st.cache = {}
+  st.cache_size = 0
   st.last_render_sig = ""
   render.stop_loading(bufnr, state_by_buf)
   state_mod.stop_scan_state(st)
@@ -171,8 +177,9 @@ end
 function M.rescan(bufnr)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
-  -- Bump cache_epoch so all cached results are invalidated and lines are re-analyzed from scratch.
   st.cache_epoch = (tonumber(st.cache_epoch) or 0) + 1
+  st.cache = {}
+  st.cache_size = 0
   st.last_render_sig = ""
   state_mod.stop_scan_state(st)
   schedule_scan(bufnr)
