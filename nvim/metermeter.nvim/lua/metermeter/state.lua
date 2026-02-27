@@ -24,6 +24,7 @@ function M.new_state()
     debug_cli_count = 0,
     debug_apply_count = 0,
     pending_lnums = {},
+    pending_keys = {}, -- lnum -> cache key (avoids extra buffer reads for spinner bookkeeping)
     spinner_frame = 0,
     loading_timer = nil,
   }
@@ -34,6 +35,8 @@ function M.stop_scan_state(st)
   st.scan_changedtick = -1
   st.last_changedtick = -1
   st.last_view_sig = ""
+  st.pending_lnums = {}
+  st.pending_keys = {}
   if st.loading_timer then
     st.loading_timer:stop()
     st.loading_timer:close()

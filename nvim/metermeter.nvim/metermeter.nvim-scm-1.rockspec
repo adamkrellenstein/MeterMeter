@@ -21,6 +21,8 @@ source = {
 build = {
   type = "builtin",
   copy_directories = {
+    "lua",
+    "python",
     "plugin",
     "doc",
     "ftdetect",

@@ -365,6 +365,55 @@ local function run_loading_indicator()
   vim.wait(100)
 end
 
+local function run_loading_indicator_duplicate_background()
+  -- Regression: when many background lines are duplicates of visible lines, they can be satisfied via cache
+  -- without a CLI request; ensure pending bookkeeping clears spinners anyway.
+  metermeter.setup({
+    rescan_interval_ms = 0,
+    debounce_ms = 1,
+    prefetch_lines = 0,
+    require_trailing_backslash = false,
+    ui = {
+      stress = true,
+      meter_hints = true,
+      loading_indicator = true,
+    },
+  })
+
+  vim.cmd("enew")
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_name(bufnr, "/tmp/metermeter_smoke_loading_dupes.poem")
+  vim.bo[bufnr].filetype = "metermeter"
+
+  local lines = {}
+  for _ = 1, 120 do
+    lines[#lines + 1] = "The trampled fruit yields wine that's sweet and red."
+  end
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+
+  metermeter.enable(bufnr)
+
+  local saw_loading = false
+  local ok = wait_for(function()
+    if #loading_marks(bufnr) > 0 then
+      saw_loading = true
+    end
+    local s = metermeter._debug_stats(bufnr)
+    return saw_loading and (not s.scan_running) and (#extmarks(bufnr) > 0)
+  end, 8000)
+  if not ok then
+    fail("loading dupes: expected loading marks and settled scan with results")
+  end
+
+  vim.wait(150)
+  if #loading_marks(bufnr) ~= 0 then
+    fail("loading dupes: loading marks should be cleared after completion")
+  end
+
+  metermeter.disable(bufnr)
+  vim.wait(100)
+end
+
 local function main()
   run_backslash_gate()
   run_comment_ignore()
@@ -373,6 +422,7 @@ local function main()
   run_manual_toggle_for_non_poem()
   run_idle_no_extra_work()
   run_confidence_shading()
+  run_loading_indicator_duplicate_background()
   run_loading_indicator()
   vim.cmd("qa!")
 end

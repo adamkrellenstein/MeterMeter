@@ -18,8 +18,10 @@ function M.check()
 
   if vim.fn.executable(python) == 1 then
     local out = vim.fn.system({ python, "--version" })
-    local ver = (out or ""):match("(%d+%.%d+)")
-    if ver and tonumber(ver) >= 3.11 then
+    local maj, min = (out or ""):match("(%d+)%.(%d+)")
+    maj = tonumber(maj)
+    min = tonumber(min)
+    if maj and min and (maj > 3 or (maj == 3 and min >= 11)) then
       vim.health.ok("Python " .. vim.trim(out))
     else
       vim.health.error("Python 3.11+ required, found: " .. vim.trim(out or "unknown"))

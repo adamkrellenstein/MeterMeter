@@ -227,12 +227,29 @@ local function run_phase(bufnr, scan_generation, render_lines, lines, on_done, s
       processed[item.lnum] = true
     end
     local remaining = {}
+    local remaining_keys = {}
     for _, lnum in ipairs(st2.pending_lnums or {}) do
-      if not processed[lnum] then
-        remaining[#remaining + 1] = lnum
+      if processed[lnum] then
+        if st2.pending_keys then
+          st2.pending_keys[lnum] = nil
+        end
+      else
+        local key = st2.pending_keys and st2.pending_keys[lnum]
+        if key and st2.cache and st2.cache[key] ~= nil then
+          -- This line is now cached (e.g. duplicate text elsewhere), so it no longer needs analysis.
+          if st2.pending_keys then
+            st2.pending_keys[lnum] = nil
+          end
+        else
+          remaining[#remaining + 1] = lnum
+          if key then
+            remaining_keys[lnum] = key
+          end
+        end
       end
     end
     st2.pending_lnums = remaining
+    st2.pending_keys = remaining_keys
     if #remaining > 0 and config.cfg.ui.loading_indicator then
       render.refresh_loading(bufnr, state_by_buf)
     else
@@ -288,16 +305,20 @@ function M.do_scan(bufnr, state_by_buf, subprocess_cmd)
 
   -- Compute uncached lines that still need analysis
   local pending = {}
+  local pending_keys = {}
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   for _, lnum in ipairs(all_scan_lines) do
     if lnum >= 0 and lnum < line_count then
       local text = (vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or "")
-      if not cache.get(st, cache.key_for_text(st, text)) then
+      local key = cache.key_for_text(st, text)
+      if not cache.get(st, key) then
         pending[#pending + 1] = lnum
+        pending_keys[lnum] = key
       end
     end
   end
   st.pending_lnums = pending
+  st.pending_keys = pending_keys
   if cfg.ui.loading_indicator then
     render.refresh_loading(bufnr, state_by_buf)
   end
