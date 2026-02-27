@@ -13,11 +13,11 @@ vim.api.nvim_create_user_command("MeterMeterToggle", function()
 end, {})
 
 vim.api.nvim_create_user_command("MeterMeterEnable", function()
-  require("metermeter").enable(0)
+  require("metermeter").enable(0, true)
 end, {})
 
 vim.api.nvim_create_user_command("MeterMeterDisable", function()
-  require("metermeter").disable(0)
+  require("metermeter").disable(0, true)
 end, {})
 
 vim.api.nvim_create_user_command("MeterMeterRescan", function()
@@ -43,9 +43,9 @@ vim.keymap.set("n", "<Plug>(metermeter-rescan)", function()
 end, { desc = "Rescan MeterMeter" })
 
 vim.keymap.set("n", "<Plug>(metermeter-enable)", function()
-  require("metermeter").enable(0)
+  require("metermeter").enable(0, true)
 end, { desc = "Enable MeterMeter" })
 
 vim.keymap.set("n", "<Plug>(metermeter-disable)", function()
-  require("metermeter").disable(0)
+  require("metermeter").disable(0, true)
 end, { desc = "Disable MeterMeter" })

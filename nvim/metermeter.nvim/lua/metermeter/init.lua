@@ -93,9 +93,13 @@ local function ensure_tick(bufnr)
 end
 
 ---@param bufnr integer Buffer number (0 for current buffer)
-function M.enable(bufnr)
+---@param user? boolean If true, record as explicit user choice (sticky across autocmds)
+function M.enable(bufnr, user)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
+  if user then
+    st.user_enabled = true
+  end
   st.enabled = true
   st.last_changedtick = -1
   st.last_view_sig = ""
@@ -105,9 +109,13 @@ function M.enable(bufnr)
 end
 
 ---@param bufnr integer Buffer number (0 for current buffer)
-function M.disable(bufnr)
+---@param user? boolean If true, record as explicit user choice (sticky across autocmds)
+function M.disable(bufnr, user)
   bufnr = (bufnr == 0) and vim.api.nvim_get_current_buf() or bufnr
   local st = ensure_state(bufnr)
+  if user then
+    st.user_enabled = false
+  end
   st.enabled = false
   render.stop_loading(bufnr, state_by_buf)
   state_mod.stop_scan_state(st)
@@ -258,6 +266,10 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile", "BufEnter" }, {
     group = group,
     callback = function(args)
+      local st = state_by_buf[args.buf]
+      if st and st.enabled then
+        return -- already enabled; don't restart the debounce timer
+      end
       if should_run_for_buf(args.buf) then
         M.enable(args.buf)
       end
@@ -267,7 +279,10 @@ function M.setup(opts)
     group = group,
     callback = function(args)
       if should_run_for_buf(args.buf) then
-        M.enable(args.buf)
+        local st = state_by_buf[args.buf]
+        if not st or not st.enabled then
+          M.enable(args.buf)
+        end
       else
         local st = state_by_buf[args.buf]
         if st and st.enabled then
