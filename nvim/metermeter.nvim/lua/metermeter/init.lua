@@ -117,6 +117,7 @@ function M.disable(bufnr, user)
     st.user_enabled = false
   end
   st.enabled = false
+  st.last_render_sig = ""
   render.stop_loading(bufnr, state_by_buf)
   state_mod.stop_scan_state(st)
   _cleanup_timers(st)
