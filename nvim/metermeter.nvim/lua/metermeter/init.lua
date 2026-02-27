@@ -182,6 +182,7 @@ function M.rescan(bufnr)
   st.cache_size = 0
   st.last_render_sig = ""
   state_mod.stop_scan_state(st)
+  render.clear_buf(bufnr)
   schedule_scan(bufnr)
 end
 
