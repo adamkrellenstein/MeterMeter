@@ -168,7 +168,7 @@ end
 
 local function run_phase(bufnr, scan_generation, render_lines, lines, on_done, state_by_buf, subprocess_cmd)
   local st = state_by_buf[bufnr]
-  if not vim.api.nvim_buf_is_valid(bufnr) or not st.enabled or st.scan_generation ~= scan_generation then
+  if not st or not vim.api.nvim_buf_is_valid(bufnr) or not st.enabled or st.scan_generation ~= scan_generation then
     if on_done then
       on_done()
     end

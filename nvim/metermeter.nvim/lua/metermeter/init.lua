@@ -294,8 +294,8 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "WinScrolled" }, {
     group = group,
     callback = function(args)
-      local st = ensure_state(args.buf)
-      if st.enabled then
+      local st = state_by_buf[args.buf]
+      if st and st.enabled then
         schedule_scan(args.buf)
       end
     end,
