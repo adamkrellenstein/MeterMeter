@@ -18,6 +18,11 @@ class MeterRescoringTests(unittest.TestCase):
         self.assertGreaterEqual(score, 0.75)
         self.assertGreaterEqual(float(debug.get("margin") or 0.0), 0.03)
 
+    def test_9_syllable_iambic_not_pentameter(self) -> None:
+        engine = MeterEngine()
+        meter, score, debug = engine.best_meter_for_stress_pattern("USUSUSUSU")
+        self.assertEqual(meter, "iambic tetrameter")
+
     def test_best_meter_for_anapestic_pattern(self) -> None:
         engine = MeterEngine()
         meter, score, debug = engine.best_meter_for_stress_pattern("UUSUUSUUSUUS")

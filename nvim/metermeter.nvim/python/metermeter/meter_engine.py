@@ -278,12 +278,12 @@ class MeterEngine:
     def _apply_meter_length_priors(self, score: float, foot_name: str, feet: int, pattern_len: int) -> float:
         out = score
         if 9 <= pattern_len <= 11:
-            if foot_name == "iambic" and feet == 5:
-                out += IAMBIC_PENTAMETER_BONUS
-            elif foot_name == "trochaic" and feet == 5:
+            if foot_name == "trochaic" and feet == 5:
                 out += TROCHAIC_PENTAMETER_BONUS
             elif foot_name in {"anapestic", "dactylic"}:
                 out -= TERNARY_METER_PENALTY
+            if foot_name == "iambic" and feet == 5 and pattern_len >= 10:
+                out += IAMBIC_PENTAMETER_BONUS
         if 12 <= pattern_len <= 13:
             if foot_name == "iambic" and feet == 6:
                 out += IAMBIC_HEXAMETER_BONUS
@@ -302,8 +302,14 @@ class MeterEngine:
             approx_feet = max(1, int(round(syllables / float(unit))))
             for feet in range(max(1, approx_feet - 1), min(6, approx_feet + 1) + 1):
                 template_len = unit * feet
-                if abs(template_len - syllables) > max_template_mismatch:
-                    continue
+                if foot_name == "iambic":
+                    # iambic pentameter/hexameter style: allow an extra trailing syllable
+                    # (feminine ending), but don't treat missing syllables as the same meter.
+                    if syllables < template_len or syllables > template_len + 1:
+                        continue
+                else:
+                    if abs(template_len - syllables) > max_template_mismatch:
+                        continue
                 template = template_unit * feet
                 dist = self._pattern_distance(pattern, template, foot_name)
                 normalizer = max(len(pattern), len(template), 1)
@@ -337,7 +343,7 @@ class MeterEngine:
         best_name, best_feet, best_score = rescored[0]
         iambic_bias = False
         iambic_bias_target = None
-        if 9 <= len(pattern) <= 11:
+        if 10 <= len(pattern) <= 11:
             iambic_bias_target = 5
         elif 12 <= len(pattern) <= 13:
             iambic_bias_target = 6
@@ -422,8 +428,12 @@ class MeterEngine:
             approx_feet = max(1, int(round(syllable_count / float(unit))))
             for feet in range(max(1, approx_feet - 1), min(6, approx_feet + 1) + 1):
                 template_len = unit * feet
-                if abs(template_len - syllable_count) > max_template_mismatch:
-                    continue
+                if foot_name == "iambic":
+                    if syllable_count < template_len or syllable_count > template_len + 1:
+                        continue
+                else:
+                    if abs(template_len - syllable_count) > max_template_mismatch:
+                        continue
                 out.append((foot_name, feet))
         return out
 
@@ -539,7 +549,7 @@ class MeterEngine:
 
         iambic_bias = False
         iambic_bias_target = None
-        if 9 <= n_syllables <= 11:
+        if 10 <= n_syllables <= 11:
             iambic_bias_target = 5
         elif 12 <= n_syllables <= 13:
             iambic_bias_target = 6
