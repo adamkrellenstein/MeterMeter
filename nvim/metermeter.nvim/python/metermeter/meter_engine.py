@@ -66,6 +66,22 @@ FOOT_TEMPLATES = {
     "dactylic": "SUU",
 }
 
+# Allowed syllable-count deltas relative to the strict template length
+# (len(FOOT_TEMPLATES[foot]) * feet). This makes meter classification stricter:
+# we only consider a meter when the line's syllable count matches one of the
+# explicit, meter-specific lengths.
+#
+# The allowed deviations encode common extrametrical patterns:
+# - iambic: allow +1 for a feminine ending (extra trailing "U")
+# - trochaic/dactylic: allow -1 for catalexis (missing final slot)
+# - anapestic: allow -1 for an opening iamb substitution (drop leading "U")
+METER_LENGTH_DELTAS: Dict[str, Tuple[int, ...]] = {
+    "iambic": (0, 1),
+    "trochaic": (-1, 0),
+    "anapestic": (-1, 0),
+    "dactylic": (-1, 0),
+}
+
 METER_NAME_RE = re.compile(
     r"^\s*(iambic|trochaic|anapestic|dactylic)\s+(monometer|dimeter|trimeter|tetrameter|pentameter|hexameter)\s*$"
 )
@@ -235,6 +251,12 @@ class MeterEngine:
     def _template_for_meter(self, foot_name: str, feet: int) -> str:
         return FOOT_TEMPLATES[foot_name] * feet
 
+    def _allowed_syllable_counts_for_meter(self, foot_name: str, feet: int) -> Tuple[int, ...]:
+        base_len = len(FOOT_TEMPLATES[foot_name]) * int(feet)
+        deltas = METER_LENGTH_DELTAS.get(foot_name, (0,))
+        allowed = sorted({base_len + delta for delta in deltas if (base_len + delta) > 0})
+        return tuple(allowed)
+
     def _foot_position_penalty(self, pattern: str, foot_name: str, feet: int) -> float:
         if not pattern or foot_name not in {"iambic", "trochaic"}:
             return 0.0
@@ -297,19 +319,9 @@ class MeterEngine:
         candidates: List[Tuple[str, int, float]] = []
         syllables = len(pattern)
         for foot_name, template_unit in FOOT_TEMPLATES.items():
-            unit = len(template_unit)
-            max_template_mismatch = 1 if unit == 2 else 2
-            approx_feet = max(1, int(round(syllables / float(unit))))
-            for feet in range(max(1, approx_feet - 1), min(6, approx_feet + 1) + 1):
-                template_len = unit * feet
-                if foot_name == "iambic":
-                    # iambic pentameter/hexameter style: allow an extra trailing syllable
-                    # (feminine ending), but don't treat missing syllables as the same meter.
-                    if syllables < template_len or syllables > template_len + 1:
-                        continue
-                else:
-                    if abs(template_len - syllables) > max_template_mismatch:
-                        continue
+            for feet in range(1, 6 + 1):
+                if syllables not in self._allowed_syllable_counts_for_meter(foot_name, feet):
+                    continue
                 template = template_unit * feet
                 dist = self._pattern_distance(pattern, template, foot_name)
                 normalizer = max(len(pattern), len(template), 1)
@@ -422,18 +434,10 @@ class MeterEngine:
 
     def _candidate_meters_for_syllables(self, syllable_count: int) -> List[Tuple[str, int]]:
         out: List[Tuple[str, int]] = []
-        for foot_name, unit_pattern in FOOT_TEMPLATES.items():
-            unit = len(unit_pattern)
-            max_template_mismatch = 1 if unit == 2 else 2
-            approx_feet = max(1, int(round(syllable_count / float(unit))))
-            for feet in range(max(1, approx_feet - 1), min(6, approx_feet + 1) + 1):
-                template_len = unit * feet
-                if foot_name == "iambic":
-                    if syllable_count < template_len or syllable_count > template_len + 1:
-                        continue
-                else:
-                    if abs(template_len - syllable_count) > max_template_mismatch:
-                        continue
+        for foot_name in FOOT_TEMPLATES.keys():
+            for feet in range(1, 6 + 1):
+                if syllable_count not in self._allowed_syllable_counts_for_meter(foot_name, feet):
+                    continue
                 out.append((foot_name, feet))
         return out
 
@@ -441,11 +445,19 @@ class MeterEngine:
         template = self._template_for_meter(foot_name, feet)
         n = len(syllables)
         m = len(template)
+        len_diff = n - m
         inf = 1e12
+
+        if len_diff not in {-1, 0, 1}:
+            fallback = "".join(unit.default_stress for unit in syllables)
+            return fallback, float("inf")
 
         dp: List[List[float]] = [[inf] * (m + 1) for _ in range(n + 1)]
         prev: List[List[Optional[Tuple[int, int, str, str]]]] = [[None] * (m + 1) for _ in range(n + 1)]
         dp[0][0] = 0.0
+
+        allow_insert = len_diff < 0
+        allow_delete = len_diff > 0
 
         for i in range(n + 1):
             for j in range(m + 1):
@@ -463,9 +475,11 @@ class MeterEngine:
                             dp[i + 1][j + 1] = new_cost
                             prev[i + 1][j + 1] = (i, j, "M", stress)
 
-                if i < n:
+                if allow_delete and foot_name == "iambic" and i < n and j == m:
                     unit = syllables[i]
-                    delete_stress, delete_opt_cost = min(unit.options, key=lambda option: (option[1], option[0]))
+                    option_costs = dict(unit.options)
+                    delete_stress = "U"
+                    delete_opt_cost = float(option_costs.get("U", 0.0))
                     delete_penalty = LENGTH_MISMATCH_COST
                     if j == m and i == n - 1 and delete_stress == "U":
                         delete_penalty = FEMININE_ENDING_COST
@@ -474,7 +488,13 @@ class MeterEngine:
                         dp[i + 1][j] = new_cost
                         prev[i + 1][j] = (i, j, "D", delete_stress)
 
-                if j < m:
+                if allow_insert and j < m:
+                    if foot_name == "anapestic":
+                        if not (i == 0 and j == 0):
+                            continue
+                    else:
+                        if i != n:
+                            continue
                     new_cost = cur + LENGTH_MISMATCH_COST
                     if new_cost < dp[i][j + 1]:
                         dp[i][j + 1] = new_cost

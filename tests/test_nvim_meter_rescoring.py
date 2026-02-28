@@ -1,9 +1,23 @@
 import unittest
 
-from metermeter.meter_engine import MeterEngine
+from metermeter.meter_engine import MeterEngine, _SyllableUnit
 
 
 class MeterRescoringTests(unittest.TestCase):
+    def _fixed_syllables(self, stress_pattern: str) -> list[_SyllableUnit]:
+        syllables: list[_SyllableUnit] = []
+        for idx, stress in enumerate(stress_pattern):
+            other = "S" if stress == "U" else "U"
+            syllables.append(_SyllableUnit(
+                text="x",
+                token_index=0,
+                char_start=idx,
+                char_end=idx + 1,
+                options=((stress, 0.0), (other, 999.0)),
+                default_stress=stress,
+            ))
+        return syllables
+
     def test_best_meter_for_iambic_pattern(self) -> None:
         engine = MeterEngine()
         meter, score, debug = engine.best_meter_for_stress_pattern("USUSUSUSUS")
@@ -32,7 +46,8 @@ class MeterRescoringTests(unittest.TestCase):
 
     def test_best_meter_for_dactylic_pattern(self) -> None:
         engine = MeterEngine()
-        meter, score, debug = engine.best_meter_for_stress_pattern("SUUSUUSUUSUUSUUSUUS")
+        pattern = "SUU" * 6
+        meter, score, debug = engine.best_meter_for_stress_pattern(pattern)
         self.assertEqual(meter, "dactylic hexameter")
         self.assertGreaterEqual(score, 0.72)
         self.assertGreaterEqual(float(debug.get("margin") or 0.0), 0.03)
@@ -85,3 +100,14 @@ class MeterRescoringTests(unittest.TestCase):
         self.assertIsNotNone(analysis)
         assert analysis is not None
         self.assertEqual(len(analysis.stress_pattern), len(analysis.syllable_positions))
+
+    def test_viterbi_disallows_internal_length_edits(self) -> None:
+        engine = MeterEngine()
+        syllables = self._fixed_syllables("USUSUSUSU")
+
+        _, trochaic_cost = engine._viterbi_for_meter(syllables, "trochaic", 5)
+        _, iambic_cost = engine._viterbi_for_meter(syllables, "iambic", 4)
+
+        self.assertLess(iambic_cost, 0.5)
+        self.assertGreater(trochaic_cost, 1.0)
+        self.assertLess(iambic_cost, trochaic_cost)

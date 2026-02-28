@@ -16,6 +16,17 @@ then remaining scannable lines across the buffer. Cached results are reused
 for unchanged lines.
 
 ==============================================================================
+METER MODEL                                            *metermeter-model*
+
+MeterMeter gates candidate meters by syllable count. For example, iambic
+pentameter is only considered for 10 syllables, or 11 when the last syllable
+can be treated as an unstressed feminine ending.
+
+For meters with a permitted length deviation, MeterMeter only allows that
+deviation at the line edges; it does not insert/delete in the middle of the
+line to force-fit a template.
+
+==============================================================================
 REQUIREMENTS                                            *metermeter-requirements*
 
 - Neovim 0.10+

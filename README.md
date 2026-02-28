@@ -46,6 +46,8 @@ line text
 - Per-line meter class (`iambic|trochaic|anapestic|dactylic` + line length label).
 - Per-syllable binary stress pattern (`S`/`U`) used for highlighting and scoring.
 
+Meter classification is syllable-count constrained. For example, `iambic pentameter` is only considered for 10 syllables, or 11 when the final syllable can be treated as an unstressed feminine ending. The Viterbi decoder treats length mismatch as edge-only (no internal insert/delete to force-fit a template).
+
 MeterMeter does not currently attempt full scholarly scansion markup (e.g. explicit substitution labels, caesura, synalepha/elision taxonomy, or poem-level global parsing).
 
 ## Comparison with other English scansion systems
