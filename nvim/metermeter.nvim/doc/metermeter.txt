@@ -24,12 +24,19 @@ contexts.
 METER MODEL                                            *metermeter-model*
 
 MeterMeter gates candidate meters by syllable count. For example, iambic
-pentameter is only considered for 10 syllables, or 11 when the last syllable
-can be treated as an unstressed feminine ending.
+pentameter is only considered for 10–11 syllables.
 
-For meters with a permitted length deviation, MeterMeter only allows that
-deviation at the line edges; it does not insert/delete in the middle of the
-line to force-fit a template.
+Length deviations are tightly controlled. Iambic meters allow an extra trailing
+unstressed syllable for feminine endings; iambic meters tetrameter and longer
+also allow a single extra unstressed syllable directly before a strong slot
+(anapestic substitution). MeterMeter does not arbitrarily insert/delete in the
+middle of the line to force-fit a template.
+
+Because syllabifiers disagree with poetic practice in a few common cases,
+MeterMeter also considers a small set of plausible verse pronunciation
+variants (penalized and limited) when the raw syllable count would otherwise
+exclude a meter class (e.g. heav'n-style contractions, or archaic -ed being
+realized as an extra syllable).
 
 ==============================================================================
 REQUIREMENTS                                            *metermeter-requirements*

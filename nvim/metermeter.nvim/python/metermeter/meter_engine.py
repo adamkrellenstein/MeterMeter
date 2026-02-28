@@ -104,6 +104,7 @@ TROCHAIC_PENTAMETER_BONUS = 0.03
 TERNARY_METER_PENALTY = 0.14
 IAMBIC_BIAS_THRESHOLD = 0.10
 IAMBIC_HEXAMETER_BONUS = 0.12
+IAMBIC_ANAPESTIC_SUB_COST = 0.55
 IAMBIC_FIRST_FOOT_PENALTY = 0.16
 IAMBIC_SPONDEE_PENALTY = 0.34
 IAMBIC_WEAK_STRONG_PENALTY = 0.58
@@ -117,6 +118,44 @@ POLY_FLIP_COST = 1.75
 FUNCTION_TO_STRONG_FLIP_COST = 0.85
 STRONG_TO_WEAK_FLIP_COST = 1.05
 CONTEXT_PRIOR_MAX_BONUS = 0.12
+
+# Verse pronunciation variants (elision/syncope).
+#
+# Meter is defined over realized syllables, but any syllabifier will disagree
+# with poetic practice in a few common cases (especially early modern English).
+# We keep strict meter-length gating (e.g. 9 syllables is never iambic
+# pentameter) while allowing a small, penalized search over plausible
+# syllabification variants.
+VERSE_VARIANT_MAX_OPS = 2
+VERSE_VARIANT_OP_PENALTY = 0.04
+
+# High-precision list of common disyllables/trisyllables that are frequently
+# contracted by 1 syllable in verse (e.g. heav'n, o'er, pow'r).
+VERSE_COMPRESS_WORDS = frozenset({
+    "heaven",
+    "even",
+    "ever",
+    "never",
+    "over",
+    "power",
+    "flower",
+    "tower",
+    "fire",
+    "hour",
+    "spirit",
+    "every",
+    "different",
+})
+
+VERSE_ED_EXPAND_EXCEPTIONS = frozenset({
+    "bed",
+    "bred",
+    "fed",
+    "led",
+    "red",
+    "shed",
+    "wed",
+})
 
 
 @dataclass
@@ -155,6 +194,21 @@ class _MeterPath:
     cost: float
     pattern: str
     context_bonus: float
+
+
+@dataclass
+class _TokenSyllables:
+    word_text: str
+    token_index: int
+    token_start: int
+    token_end: int
+    units: List[_SyllableUnit]
+
+
+@dataclass(frozen=True)
+class _VerseVariantOp:
+    token_pos: int
+    kind: str  # "merge_last_two" | "split_ed"
 
 
 class MeterEngine:
@@ -488,6 +542,18 @@ class MeterEngine:
                         dp[i + 1][j] = new_cost
                         prev[i + 1][j] = (i, j, "D", delete_stress)
 
+                if allow_delete and foot_name == "iambic" and feet >= 4 and i < n and j < m and template[j] == "S":
+                    # Allow a single extra weak syllable before a strong slot
+                    # (anapestic substitution) in iambic meters.
+                    unit = syllables[i]
+                    option_costs = dict(unit.options)
+                    delete_stress = "U"
+                    delete_opt_cost = float(option_costs.get("U", 0.0))
+                    new_cost = cur + delete_opt_cost + IAMBIC_ANAPESTIC_SUB_COST
+                    if new_cost < dp[i + 1][j]:
+                        dp[i + 1][j] = new_cost
+                        prev[i + 1][j] = (i, j, "D", delete_stress)
+
                 if allow_insert and j < m:
                     if foot_name == "anapestic":
                         if not (i == 0 and j == 0):
@@ -651,6 +717,190 @@ class MeterEngine:
             rebuilt.append((start, end))
         return rebuilt
 
+    def _token_allows_verse_compression(self, word_text: str, syllable_count: int) -> bool:
+        if syllable_count < 2:
+            return False
+        key = (word_text or "").strip().lower().replace("’", "'").replace("'", "")
+        return key in VERSE_COMPRESS_WORDS
+
+    def _token_allows_ed_expansion(self, word_text: str, syllable_count: int) -> bool:
+        if syllable_count != 1:
+            return False
+        key = (word_text or "").strip().lower().replace("’", "'").replace("'", "")
+        if len(key) < 4:
+            return False
+        if not key.endswith("ed"):
+            return False
+        if key in VERSE_ED_EXPAND_EXCEPTIONS:
+            return False
+        return True
+
+    def _merge_last_two_syllables(self, word_text: str, units: List[_SyllableUnit]) -> List[_SyllableUnit]:
+        if len(units) < 2:
+            return units
+        a = units[-2]
+        b = units[-1]
+        if a.token_index != b.token_index:
+            return units
+        lexical_stressed = (a.default_stress == "S") or (b.default_stress == "S")
+        options = self._options_for_syllable(word_text, is_monosyllable=False, lexical_stressed=lexical_stressed)
+        default_stress = min(options, key=lambda option: (option[1], option[0]))[0]
+        merged = _SyllableUnit(
+            text=(a.text or "") + (b.text or ""),
+            token_index=a.token_index,
+            char_start=min(a.char_start, b.char_start),
+            char_end=max(a.char_end, b.char_end),
+            options=options,
+            default_stress=default_stress,
+        )
+        if merged.char_end <= merged.char_start:
+            return units
+        return [*units[:-2], merged]
+
+    def _split_trailing_ed(
+        self,
+        line: str,
+        word_text: str,
+        token_start: int,
+        token_end: int,
+        units: List[_SyllableUnit],
+    ) -> List[_SyllableUnit]:
+        if not units:
+            return units
+        if token_end - token_start < 3:
+            return units
+        if not (word_text or "").lower().endswith("ed"):
+            return units
+        base = units[-1]
+        if base.token_index != units[0].token_index:
+            return units
+        suffix_start = max(token_start, token_end - 2)
+        if suffix_start <= token_start or suffix_start >= token_end:
+            return units
+
+        base_adj = _SyllableUnit(
+            text=base.text,
+            token_index=base.token_index,
+            char_start=base.char_start,
+            char_end=min(base.char_end, suffix_start),
+            options=base.options,
+            default_stress=base.default_stress,
+        )
+        suffix_text = (line[suffix_start:token_end] or "").lower()
+        suffix_options = self._options_for_syllable(word_text, is_monosyllable=False, lexical_stressed=False)
+        suffix_default = min(suffix_options, key=lambda option: (option[1], option[0]))[0]
+        suffix_unit = _SyllableUnit(
+            text=suffix_text,
+            token_index=base.token_index,
+            char_start=suffix_start,
+            char_end=token_end,
+            options=suffix_options,
+            default_stress=suffix_default,
+        )
+        if base_adj.char_end <= base_adj.char_start:
+            # Fall back to keeping the original unit unchanged; the suffix unit
+            # still carries the extra syllable for metrical purposes.
+            base_adj = base
+        return [*units[:-1], base_adj, suffix_unit]
+
+    def _best_meter_for_verse_variants(
+        self,
+        line: str,
+        token_infos: List[_TokenSyllables],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, float, Dict[str, float], str, List[_SyllableUnit]]:
+        base_units: List[_SyllableUnit] = []
+        for info in token_infos:
+            base_units.extend(info.units)
+
+        meter_name, best_score, debug_scores, resolved_pattern = self._best_meter_for_ambiguous_syllables(
+            base_units,
+            context=context,
+        )
+        chosen_units = base_units
+        chosen_ops: Tuple[_VerseVariantOp, ...] = ()
+        best_adjusted = best_score
+
+        n_syllables = len(base_units)
+        ops: List[_VerseVariantOp] = []
+        if n_syllables >= 12:
+            for pos, info in enumerate(token_infos):
+                if self._token_allows_verse_compression(info.word_text, len(info.units)):
+                    ops.append(_VerseVariantOp(token_pos=pos, kind="merge_last_two"))
+        elif n_syllables <= 9:
+            for pos, info in enumerate(token_infos):
+                if self._token_allows_ed_expansion(info.word_text, len(info.units)):
+                    ops.append(_VerseVariantOp(token_pos=pos, kind="split_ed"))
+
+        if not ops:
+            debug_scores = dict(debug_scores)
+            debug_scores["verse_ops"] = 0.0
+            return meter_name, best_score, debug_scores, resolved_pattern, chosen_units
+
+        # Cap per-line variant search.
+        ops = ops[:10]
+
+        base_by_token = [info.units for info in token_infos]
+
+        def apply_ops(apply_list: Tuple[_VerseVariantOp, ...]) -> List[_SyllableUnit]:
+            by_token = list(base_by_token)
+            for op in apply_list:
+                if not (0 <= op.token_pos < len(token_infos)):
+                    continue
+                info = token_infos[op.token_pos]
+                cur = by_token[op.token_pos]
+                if op.kind == "merge_last_two":
+                    by_token[op.token_pos] = self._merge_last_two_syllables(info.word_text, cur)
+                elif op.kind == "split_ed":
+                    by_token[op.token_pos] = self._split_trailing_ed(line, info.word_text, info.token_start, info.token_end, cur)
+            flat: List[_SyllableUnit] = []
+            for units in by_token:
+                flat.extend(units)
+            return flat
+
+        candidates: List[Tuple[_VerseVariantOp, ...]] = [()]
+        for op in ops:
+            candidates.append((op,))
+        if VERSE_VARIANT_MAX_OPS >= 2:
+            for i in range(len(ops)):
+                for j in range(i + 1, len(ops)):
+                    if ops[i].token_pos == ops[j].token_pos:
+                        continue
+                    candidates.append((ops[i], ops[j]))
+
+        for op_list in candidates:
+            if not op_list:
+                continue
+            units = apply_ops(op_list)
+            if not units:
+                continue
+            m, score, dbg, pat = self._best_meter_for_ambiguous_syllables(units, context=context)
+            penalty = VERSE_VARIANT_OP_PENALTY * float(len(op_list))
+            adjusted = score - penalty
+            if adjusted > best_adjusted + 1e-9:
+                meter_name, best_score, debug_scores, resolved_pattern = m, score, dbg, pat
+                best_adjusted = adjusted
+                chosen_units = units
+                chosen_ops = op_list
+            elif abs(adjusted - best_adjusted) <= 1e-9 and adjusted > 0:
+                # Tie-breakers: higher raw score, then fewer ops, then stable meter name.
+                if score > best_score + 1e-9:
+                    meter_name, best_score, debug_scores, resolved_pattern = m, score, dbg, pat
+                    chosen_units = units
+                    chosen_ops = op_list
+                elif abs(score - best_score) <= 1e-9 and len(op_list) < len(chosen_ops):
+                    meter_name, best_score, debug_scores, resolved_pattern = m, score, dbg, pat
+                    chosen_units = units
+                    chosen_ops = op_list
+                elif abs(score - best_score) <= 1e-9 and len(op_list) == len(chosen_ops) and (m or "") < (meter_name or ""):
+                    meter_name, best_score, debug_scores, resolved_pattern = m, score, dbg, pat
+                    chosen_units = units
+                    chosen_ops = op_list
+
+        debug_scores = dict(debug_scores)
+        debug_scores["verse_ops"] = float(len(chosen_ops))
+        return meter_name, best_score, debug_scores, resolved_pattern, chosen_units
+
     def analyze_line(
         self,
         line: str,
@@ -676,6 +926,7 @@ class MeterEngine:
 
         syllables: List[_SyllableUnit] = []
         token_patterns: List[str] = []
+        token_infos: List[_TokenSyllables] = []
         token_cursor = 0
         line_char_len = len(line)
 
@@ -712,26 +963,37 @@ class MeterEngine:
             syllable_spans = self._align_syllables_in_token(line, token_start, token_end, syllable_texts)
 
             token_pattern_default = ""
+            token_units: List[_SyllableUnit] = []
             for syl, syl_text, (span_start, span_end) in zip(syls, syllable_texts, syllable_spans):
                 lexical_stressed = bool(getattr(syl, "is_stressed", False))
                 options = self._options_for_syllable(word_text, is_mono, lexical_stressed)
                 default_stress = min(options, key=lambda option: (option[1], option[0]))[0]
                 token_pattern_default += default_stress
-                syllables.append(_SyllableUnit(
+                unit = _SyllableUnit(
                     text=syl_text,
                     token_index=token_index,
                     char_start=max(0, min(line_char_len, span_start)),
                     char_end=max(0, min(line_char_len, span_end)),
                     options=options,
                     default_stress=default_stress,
-                ))
+                )
+                token_units.append(unit)
+                syllables.append(unit)
             token_patterns.append(token_pattern_default or "U")
+            token_infos.append(_TokenSyllables(
+                word_text=word_text,
+                token_index=token_index,
+                token_start=token_start,
+                token_end=token_end,
+                units=token_units,
+            ))
 
         if not syllables:
             return None
 
-        meter_name, best_score, debug_scores, resolved_pattern = self._best_meter_for_ambiguous_syllables(
-            syllables,
+        meter_name, best_score, debug_scores, resolved_pattern, syllables = self._best_meter_for_verse_variants(
+            line,
+            token_infos,
             context=context,
         )
         if len(resolved_pattern) != len(syllables):

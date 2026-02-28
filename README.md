@@ -46,7 +46,9 @@ line text
 - Per-line meter class (`iambic|trochaic|anapestic|dactylic` + line length label).
 - Per-syllable binary stress pattern (`S`/`U`) used for highlighting and scoring.
 
-Meter classification is syllable-count constrained. For example, `iambic pentameter` is only considered for 10 syllables, or 11 when the final syllable can be treated as an unstressed feminine ending. The Viterbi decoder treats length mismatch as edge-only (no internal insert/delete to force-fit a template).
+Meter classification is syllable-count constrained. For example, `iambic pentameter` is only considered for 10–11 syllables (never 9). The Viterbi decoder keeps length mismatch tightly controlled: it allows an extra trailing unstressed syllable for iambic feminine endings, and (for iambic meters tetrameter and longer) a single extra unstressed syllable directly before a strong slot (anapestic substitution), rather than arbitrary insert/delete anywhere in the line.
+
+Because syllabifiers disagree with poetic practice in a few common cases, MeterMeter also considers a small set of plausible verse pronunciation variants (penalized and limited) when the raw syllable count would otherwise exclude a meter class (e.g. contractions like `heaven` → `heav'n`, or `-ed` being realized as an extra syllable in archaic diction).
 
 MeterMeter does not currently attempt full scholarly scansion markup (e.g. explicit substitution labels, caesura, synalepha/elision taxonomy, or poem-level global parsing).
 
@@ -59,10 +61,10 @@ The only widely-used English gold standard is [For Better For Verse](https://git
 | Scandroid (Hartman) | Dict + rules → stress → feet | ~90% | -- |
 | ZeuScansion (Agirrezabal 2016) | Dict + POS + Groves rules → stress → template | 86.78% | -- |
 | BiLSTM-CRF (Agirrezabal 2017) | Neural sequence labeling | 92.96% | 61.39% |
-| **MeterMeter** | **Dict + function-word priors + meter-aware Viterbi** | **~87.7%** | **~77.2%** |
+| **MeterMeter** | **Dict + function-word priors + meter-aware Viterbi** | **~86%** | **~79%** |
 
 Per-syllable agreement is naturally high because most syllables are lexically stable. Meter-class accuracy is stricter than token-level agreement but is still a different metric from exact whole-line stress-string match.
-The current MeterMeter values above come from `benchmarks/run_benchmark.py` on the full local 4B4V corpus (1,181 lines) as measured on February 24, 2026.
+The current MeterMeter values above come from `benchmarks/run_benchmark.py` on the full local 4B4V corpus (1,181 lines) as measured on February 28, 2026.
 
 ### Metrics and comparability
 

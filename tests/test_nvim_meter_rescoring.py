@@ -101,7 +101,7 @@ class MeterRescoringTests(unittest.TestCase):
         assert analysis is not None
         self.assertEqual(len(analysis.stress_pattern), len(analysis.syllable_positions))
 
-    def test_viterbi_disallows_internal_length_edits(self) -> None:
+    def test_viterbi_does_not_force_trochaic_via_length_edits(self) -> None:
         engine = MeterEngine()
         syllables = self._fixed_syllables("USUSUSUSU")
 
@@ -110,4 +110,15 @@ class MeterRescoringTests(unittest.TestCase):
 
         self.assertLess(iambic_cost, 0.5)
         self.assertGreater(trochaic_cost, 1.0)
+        self.assertLess(iambic_cost, trochaic_cost)
+
+    def test_viterbi_allows_iambic_anapestic_substitution(self) -> None:
+        engine = MeterEngine()
+        # 11 syllables with an internal extra weak syllable ("UU" before a strong).
+        syllables = self._fixed_syllables("USUSUUSUSUS")
+
+        _, iambic_cost = engine._viterbi_for_meter(syllables, "iambic", 5)
+        _, trochaic_cost = engine._viterbi_for_meter(syllables, "trochaic", 6)
+
+        self.assertLess(iambic_cost, 1.0)
         self.assertLess(iambic_cost, trochaic_cost)
