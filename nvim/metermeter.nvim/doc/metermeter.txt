@@ -9,7 +9,7 @@ INTRODUCTION                                            *metermeter*
 
 MeterMeter provides real-time poetic meter annotation in Neovim. It uses a
 persistent Python subprocess to analyze lines, showing stress highlighting
-and meter labels (e.g. "iambic pentameter") as virtual text.
+and meter labels (e.g. "iamb pent") as virtual text.
 
 Scanning is progressive: visible lines first, nearby prefetch lines next,
 then remaining scannable lines across the buffer. Cached results are reused
@@ -82,6 +82,11 @@ ui.stress ~
 ui.meter_hints ~
     Show meter label at end of line (optionally with notes like "(fem, inv)";
     see |metermeter.ui.meter_hint_details|).
+    Default: `true`
+
+                                                *metermeter.ui.meter_hint_abbrev*
+ui.meter_hint_abbrev ~
+    Abbreviate meter names in the end-of-line hint (e.g. "iamb pent").
     Default: `true`
 
                                                 *metermeter.ui.meter_hint_details*

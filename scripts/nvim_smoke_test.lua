@@ -307,6 +307,30 @@ local function run_confidence_shading()
     fail("confidence shading: should have marks including at least one confident tier")
   end
 
+  for _, m in ipairs(extmarks(bufnr)) do
+    local d = m[4] or {}
+    if d.virt_text and d.virt_text[1] and (d.virt_text[1][2] == "MeterMeterEOL0" or d.virt_text[1][2] == "MeterMeterEOL1") then
+      local label = tostring(d.virt_text[1][1] or "")
+      local full_words = {
+        "iambic",
+        "trochaic",
+        "anapestic",
+        "dactylic",
+        "monometer",
+        "dimeter",
+        "trimeter",
+        "tetrameter",
+        "pentameter",
+        "hexameter",
+      }
+      for _, w in ipairs(full_words) do
+        if label:find(w, 1, true) then
+          fail("confidence shading: meter hint not abbreviated (" .. w .. " in " .. label .. ")")
+        end
+      end
+    end
+  end
+
   metermeter.disable(bufnr)
   vim.wait(100)
 end

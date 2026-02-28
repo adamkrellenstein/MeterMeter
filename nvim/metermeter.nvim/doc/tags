@@ -38,6 +38,7 @@ metermeter.toggle()	metermeter.txt	/*metermeter.toggle()*
 metermeter.txt	metermeter.txt	/*metermeter.txt*
 metermeter.ui.confident_threshold	metermeter.txt	/*metermeter.ui.confident_threshold*
 metermeter.ui.loading_indicator	metermeter.txt	/*metermeter.ui.loading_indicator*
+metermeter.ui.meter_hint_abbrev	metermeter.txt	/*metermeter.ui.meter_hint_abbrev*
 metermeter.ui.meter_hint_details	metermeter.txt	/*metermeter.ui.meter_hint_details*
 metermeter.ui.meter_hints	metermeter.txt	/*metermeter.ui.meter_hints*
 metermeter.ui.stress	metermeter.txt	/*metermeter.ui.stress*

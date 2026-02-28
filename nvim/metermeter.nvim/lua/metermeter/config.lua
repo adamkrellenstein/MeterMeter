@@ -8,6 +8,7 @@ local DEFAULTS = {
   ui = {
     stress = true,
     meter_hints = true,
+    meter_hint_abbrev = true,
     -- "off" | "deviations" | "always"
     -- - off: show only meter_name
     -- - deviations: show only non-default notes (e.g. feminine ending, inversions, spondees)
