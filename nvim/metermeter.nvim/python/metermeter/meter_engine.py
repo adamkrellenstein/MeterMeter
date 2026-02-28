@@ -298,8 +298,12 @@ class MeterEngine:
         syllables = len(pattern)
         for foot_name, template_unit in FOOT_TEMPLATES.items():
             unit = len(template_unit)
+            max_template_mismatch = 1 if unit == 2 else 2
             approx_feet = max(1, int(round(syllables / float(unit))))
             for feet in range(max(1, approx_feet - 1), min(6, approx_feet + 1) + 1):
+                template_len = unit * feet
+                if abs(template_len - syllables) > max_template_mismatch:
+                    continue
                 template = template_unit * feet
                 dist = self._pattern_distance(pattern, template, foot_name)
                 normalizer = max(len(pattern), len(template), 1)
@@ -414,8 +418,12 @@ class MeterEngine:
         out: List[Tuple[str, int]] = []
         for foot_name, unit_pattern in FOOT_TEMPLATES.items():
             unit = len(unit_pattern)
+            max_template_mismatch = 1 if unit == 2 else 2
             approx_feet = max(1, int(round(syllable_count / float(unit))))
             for feet in range(max(1, approx_feet - 1), min(6, approx_feet + 1) + 1):
+                template_len = unit * feet
+                if abs(template_len - syllable_count) > max_template_mismatch:
+                    continue
                 out.append((foot_name, feet))
         return out
 
