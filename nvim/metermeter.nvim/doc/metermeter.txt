@@ -171,6 +171,8 @@ All functions are available via `require("metermeter")`.
 
                                                 *metermeter.setup()*
 setup({opts})           Initialize the plugin with optional config overrides.
+                        Reads configuration from `g:metermeter_*` globals;
+                        globals override any values passed in {opts}.
                         Must be called before any other function.
 
                                                 *metermeter.enable()*
