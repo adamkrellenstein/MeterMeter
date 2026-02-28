@@ -15,6 +15,11 @@ Scanning is progressive: visible lines first, nearby prefetch lines next,
 then remaining scannable lines across the buffer. Cached results are reused
 for unchanged lines.
 
+After an initial full-buffer pass, MeterMeter may automatically run a second
+pass using the buffer's dominant meter as context. This keeps ambiguous
+lines consistent and avoids reusing cached results across incompatible
+contexts.
+
 ==============================================================================
 METER MODEL                                            *metermeter-model*
 
@@ -275,6 +280,10 @@ No annotations appear ~
     Check that `&filetype` includes "metermeter" and that the statusline
     shows "MM: ..." or a meter name. Use `:MeterMeterToggle` to force-enable
     on any buffer.
+
+Meter labels change after opening a file ~
+    MeterMeter may do a second pass once it detects a strong dominant meter.
+    This is expected; use `:MeterMeterRescan` if the buffer looks stale.
 
 Unexpected highlights ~
     Run `:MeterMeterDebug` and inspect the JSON at |metermeter.debug_dump_path|.

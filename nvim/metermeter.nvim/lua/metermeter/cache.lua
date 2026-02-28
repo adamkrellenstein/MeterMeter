@@ -52,7 +52,20 @@ function M.key_for_text(st, text)
   if st and st.cache_epoch then
     epoch = tonumber(st.cache_epoch) or 0
   end
-  return tostring(epoch) .. "\n" .. text
+  local ctx_meter = ""
+  local ctx_strength = 0
+  if st then
+    ctx_meter = tostring(st.analysis_context_meter or "")
+    ctx_strength = tonumber(st.analysis_context_strength) or 0
+  end
+
+  local ctx = ""
+  if ctx_meter ~= "" and ctx_strength > 0 then
+    ctx_strength = math.max(0, math.min(1, ctx_strength))
+    ctx = ctx_meter .. "@" .. string.format("%.2f", ctx_strength)
+  end
+
+  return tostring(epoch) .. "\n" .. ctx .. "\n" .. text
 end
 
 return M

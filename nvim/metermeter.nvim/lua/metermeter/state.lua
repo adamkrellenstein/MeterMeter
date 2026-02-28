@@ -11,6 +11,10 @@ function M.new_state()
     cache_seq = 0,
     cache_write_seq = 0,
     cache_epoch = 0,
+    analysis_context_meter = "",
+    analysis_context_strength = 0,
+    analysis_context_pass = 0, -- incremented when we auto-trigger a context rescan
+    analysis_context_changedtick = -1, -- changedtick corresponding to analysis_context_pass
     scan_generation = 0,
     scan_running = false,
     scan_changedtick = -1,
@@ -19,6 +23,8 @@ function M.new_state()
     last_render_sig = "",
     dominant_meter = "",
     dominant_strength = 0,
+    dominant_line_count = 0,
+    dominant_total_weight = 0,
     last_error = nil, -- string or nil; most recent CLI error message
     debug_scan_count = 0,
     debug_cli_count = 0,

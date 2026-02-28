@@ -59,13 +59,13 @@ local function build_request(bufnr, ordered_lines, state_by_buf)
   end
 
   local req = { lines = lines }
-  local dominant_meter = tostring(st.dominant_meter or "")
-  local dominant_strength = tonumber(st.dominant_strength) or 0
-  dominant_strength = math.max(0, math.min(1, dominant_strength))
-  if dominant_meter ~= "" and dominant_strength > 0 then
+  local ctx_meter = tostring(st.analysis_context_meter or "")
+  local ctx_strength = tonumber(st.analysis_context_strength) or 0
+  ctx_strength = math.max(0, math.min(1, ctx_strength))
+  if ctx_meter ~= "" and ctx_strength > 0 then
     req.context = {
-      dominant_meter = dominant_meter,
-      dominant_strength = dominant_strength,
+      dominant_meter = ctx_meter,
+      dominant_strength = ctx_strength,
     }
   end
   return req
@@ -123,28 +123,31 @@ local function merge_cache_and_results(bufnr, resp, ordered_lines, state_by_buf)
   -- Compute dominant meter from cached results.
   local counts = {}
   local total = 0
+  local meter_line_count = 0
   for _, item in ipairs(out) do
     local meter = item.meter_name or ""
     if meter ~= "" then
+      meter_line_count = meter_line_count + 1
       local conf = tonumber(item.confidence) or 0.5
       conf = math.max(0.05, math.min(1.0, conf))
       counts[meter] = (counts[meter] or 0) + conf
       total = total + conf
     end
   end
-  local best_meter = ""
-  local best_weight = 0
-  for meter, weight in pairs(counts) do
-    if weight > best_weight then
-      best_meter = meter
-      best_weight = weight
-    end
-  end
-  st.dominant_meter = best_meter
+  st.dominant_line_count = meter_line_count
+  st.dominant_total_weight = total
+
   if total > 0 then
+    local best_meter = ""
+    local best_weight = 0
+    for meter, weight in pairs(counts) do
+      if weight > best_weight or (weight == best_weight and (best_meter == "" or meter < best_meter)) then
+        best_meter = meter
+        best_weight = weight
+      end
+    end
+    st.dominant_meter = best_meter
     st.dominant_strength = best_weight / total
-  else
-    st.dominant_strength = 0
   end
 
   return out
@@ -276,6 +279,10 @@ function M.do_scan(bufnr, state_by_buf, subprocess_cmd)
 
   local cfg = config.cfg
   local changedtick = tonumber(vim.api.nvim_buf_get_changedtick(bufnr)) or 0
+  if (tonumber(st.analysis_context_changedtick) or -1) ~= changedtick then
+    st.analysis_context_changedtick = changedtick
+    st.analysis_context_pass = 0
+  end
   local view_sig = scanner.viewport_signature(bufnr)
   if (not st.scan_running) and st.last_changedtick == changedtick and st.last_view_sig == view_sig then
     return
@@ -302,6 +309,12 @@ function M.do_scan(bufnr, state_by_buf, subprocess_cmd)
   local cached_results = merge_cache_and_results(bufnr, { results = {} }, render_lines, state_by_buf)
   maybe_apply_results(bufnr, cached_results, state_by_buf)
   if #all_scan_lines == 0 then
+    st.dominant_meter = ""
+    st.dominant_strength = 0
+    st.dominant_line_count = 0
+    st.dominant_total_weight = 0
+    st.analysis_context_meter = ""
+    st.analysis_context_strength = 0
     st.scan_running = false
     return
   end
@@ -327,8 +340,41 @@ function M.do_scan(bufnr, state_by_buf, subprocess_cmd)
   end
 
   local function finish_scan()
-    if state_by_buf[bufnr] and state_by_buf[bufnr].scan_generation == gen then
-      state_by_buf[bufnr].scan_running = false
+    local st2 = state_by_buf[bufnr]
+    if st2 and st2.scan_generation == gen then
+      st2.scan_running = false
+
+      local dominant_meter = tostring(st2.dominant_meter or "")
+      local dominant_strength = tonumber(st2.dominant_strength) or 0
+      local dominant_lines = tonumber(st2.dominant_line_count) or 0
+
+      local threshold = tonumber((cfg.ui and cfg.ui.confident_threshold) or 0.7) or 0.7
+      threshold = math.max(0, math.min(1, threshold))
+
+      if dominant_meter ~= "" and dominant_strength >= threshold and dominant_lines >= 4 then
+        local cur_context_meter = tostring(st2.analysis_context_meter or "")
+        local pass = tonumber(st2.analysis_context_pass) or 0
+        if pass < 2 and dominant_meter ~= cur_context_meter then
+          st2.analysis_context_meter = dominant_meter
+          st2.analysis_context_strength = dominant_strength
+
+          st2.analysis_context_pass = pass + 1
+          st2.cache_epoch = (tonumber(st2.cache_epoch) or 0) + 1
+          st2.cache = {}
+          st2.cache_size = 0
+          st2.pending_lnums = {}
+          st2.pending_keys = {}
+
+          -- Force a new scan even if the buffer and viewport are unchanged.
+          st2.last_view_sig = ""
+          -- Keep existing annotations until new results arrive.
+          st2.last_render_sig = ""
+
+          vim.schedule(function()
+            M.do_scan(bufnr, state_by_buf, subprocess_cmd)
+          end)
+        end
+      end
     end
   end
 

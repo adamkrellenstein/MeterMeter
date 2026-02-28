@@ -20,6 +20,7 @@ metermeter-health	metermeter.txt	/*metermeter-health*
 metermeter-highlights	metermeter.txt	/*metermeter-highlights*
 metermeter-install	metermeter.txt	/*metermeter-install*
 metermeter-mappings	metermeter.txt	/*metermeter-mappings*
+metermeter-model	metermeter.txt	/*metermeter-model*
 metermeter-requirements	metermeter.txt	/*metermeter-requirements*
 metermeter-statusline	metermeter.txt	/*metermeter-statusline*
 metermeter-troubleshooting	metermeter.txt	/*metermeter-troubleshooting*

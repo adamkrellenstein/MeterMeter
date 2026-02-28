@@ -104,6 +104,14 @@ function M.enable(bufnr, user)
   st.cache_epoch = (tonumber(st.cache_epoch) or 0) + 1
   st.cache = {}
   st.cache_size = 0
+  st.analysis_context_meter = ""
+  st.analysis_context_strength = 0
+  st.analysis_context_pass = 0
+  st.analysis_context_changedtick = -1
+  st.dominant_meter = ""
+  st.dominant_strength = 0
+  st.dominant_line_count = 0
+  st.dominant_total_weight = 0
   st.last_changedtick = -1
   st.last_view_sig = ""
   engine.refresh_statusline()
@@ -180,6 +188,14 @@ function M.rescan(bufnr)
   st.cache_epoch = (tonumber(st.cache_epoch) or 0) + 1
   st.cache = {}
   st.cache_size = 0
+  st.analysis_context_meter = ""
+  st.analysis_context_strength = 0
+  st.analysis_context_pass = 0
+  st.analysis_context_changedtick = -1
+  st.dominant_meter = ""
+  st.dominant_strength = 0
+  st.dominant_line_count = 0
+  st.dominant_total_weight = 0
   st.last_render_sig = ""
   state_mod.stop_scan_state(st)
   render.clear_buf(bufnr)
@@ -207,6 +223,9 @@ function M.debug_dump(bufnr)
       tonumber(st.debug_scan_count) or 0,
       tonumber(st.debug_cli_count) or 0
     )
+    if st.analysis_context_meter and st.analysis_context_meter ~= "" then
+      summary = summary .. ("  context=%s"):format(tostring(st.analysis_context_meter))
+    end
   end
   local sl = M.statusline(bufnr)
   summary = summary .. ("  statusline()=%q"):format(sl)
@@ -221,8 +240,15 @@ function M.debug_dump(bufnr)
     enabled = st.enabled,
     auto_enable = auto_on,
     user_enabled = st.user_enabled,
+    cache_epoch = st.cache_epoch,
+    analysis_context_meter = st.analysis_context_meter,
+    analysis_context_strength = st.analysis_context_strength,
+    analysis_context_pass = st.analysis_context_pass,
+    analysis_context_changedtick = st.analysis_context_changedtick,
     dominant_meter = st.dominant_meter,
     dominant_strength = st.dominant_strength,
+    dominant_line_count = st.dominant_line_count,
+    dominant_total_weight = st.dominant_total_weight,
     last_error = st.last_error,
     debug_scan_count = st.debug_scan_count,
     debug_cli_count = st.debug_cli_count,
