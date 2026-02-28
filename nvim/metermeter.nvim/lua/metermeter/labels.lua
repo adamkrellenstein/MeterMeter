@@ -3,19 +3,19 @@ local config = require("metermeter.config")
 local M = {}
 
 local FOOT_ABBREV = {
-  iambic = "iamb",
-  trochaic = "troch",
-  anapestic = "anap",
-  dactylic = "dact",
+  iambic = "i",
+  trochaic = "t",
+  anapestic = "a",
+  dactylic = "d",
 }
 
 local LINE_ABBREV = {
-  monometer = "mono",
-  dimeter = "di",
-  trimeter = "tri",
-  tetrameter = "tet",
-  pentameter = "pent",
-  hexameter = "hex",
+  monometer = "1",
+  dimeter = "2",
+  trimeter = "3",
+  tetrameter = "4",
+  pentameter = "P",
+  hexameter = "H",
 }
 
 local function _details_mode()
@@ -41,10 +41,10 @@ function M.abbrev_meter_name(meter_name)
   line = line:lower()
   local foot_abbrev = FOOT_ABBREV[foot]
   local line_abbrev = LINE_ABBREV[line]
-  if not foot_abbrev or not line_abbrev then
-    return tostring(meter_name or "")
+  if foot_abbrev and line_abbrev then
+    return foot_abbrev .. line_abbrev
   end
-  return foot_abbrev .. " " .. line_abbrev
+  return tostring(meter_name or "")
 end
 
 ---@param item table

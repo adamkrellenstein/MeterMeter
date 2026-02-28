@@ -1,5 +1,5 @@
 -- Auto-setup with defaults, and define user commands.
--- Users can call require("metermeter").setup({ ... }) to override defaults.
+-- Users can set g:metermeter_* globals before setup() runs to override defaults.
 
 if vim.g.metermeter_disable_auto_setup ~= 1 then
   pcall(function()

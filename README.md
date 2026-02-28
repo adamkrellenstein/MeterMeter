@@ -187,11 +187,19 @@ Lines ending with `\` are then the only ones annotated. Comment lines (per `&com
 | `require_trailing_backslash` | `false` | Only annotate lines ending with `\`. |
 | `ui.stress` | `true` | Enable stress span highlighting. |
 | `ui.meter_hints` | `true` | Show meter label at end of line. |
-| `ui.meter_hint_abbrev` | `true` | Abbreviate meter names in the end-of-line hint (e.g. `iamb pent`). |
+| `ui.meter_hint_abbrev` | `true` | Abbreviate meter names in the end-of-line hint (e.g. `iP`, `t4`). |
 | `ui.meter_hint_details` | `"deviations"` | Hint detail level: `"off"`, `"deviations"` (only feminine endings/substitutions), or `"always"` (always show masc/fem + substitutions). |
 | `ui.confident_threshold` | `0.7` | Confidence >= this is bright; below is dim. |
 | `cache.max_entries` | `5000` | Per-buffer LRU cache capacity. |
 | `debug_dump_path` | `"/tmp/metermeter_nvim_dump.json"` | Output path for `:MeterMeterDebug`. |
+
+All options can be set via `vim.g` globals (Vimscript: `g:metermeter_*`) before the plugin loads:
+
+```vim
+let g:metermeter_debounce_ms = 120
+let g:metermeter_ui_meter_hint_abbrev = 1
+let g:metermeter_ui_meter_hint_details = 'deviations'
+```
 
 ### Global variable
 

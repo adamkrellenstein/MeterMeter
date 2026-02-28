@@ -9,7 +9,7 @@ INTRODUCTION                                            *metermeter*
 
 MeterMeter provides real-time poetic meter annotation in Neovim. It uses a
 persistent Python subprocess to analyze lines, showing stress highlighting
-and meter labels (e.g. "iamb pent") as virtual text.
+and meter labels (e.g. "iP") as virtual text.
 
 Scanning is progressive: visible lines first, nearby prefetch lines next,
 then remaining scannable lines across the buffer. Cached results are reused
@@ -46,47 +46,55 @@ vim-plug: >vim
 ==============================================================================
 CONFIGURATION                                           *metermeter-config*
 
-Pass a table to `setup()` to override defaults: >lua
-    require("metermeter").setup({
-      debounce_ms = 100,
-      ui = { stress = true, meter_hints = true },
-    })
+Configure via `g:metermeter_*` globals (set in your init.vim/init.lua before the
+plugin loads). MeterMeter auto-calls `setup()` unless you set
+`g:metermeter_disable_auto_setup = 1`. >vim
+    let g:metermeter_debounce_ms = 100
+    let g:metermeter_ui_meter_hint_abbrev = 1
+    let g:metermeter_ui_meter_hint_details = 'deviations'
 <
 
                                                 *metermeter.debounce_ms*
 debounce_ms ~
     Delay (ms) after edits before rescanning.
+    Global: `g:metermeter_debounce_ms`
     Default: `80`
 
                                                 *metermeter.rescan_interval_ms*
 rescan_interval_ms ~
     Periodic rescan interval (ms). `0` disables.
+    Global: `g:metermeter_rescan_interval_ms`
     Default: `0`
 
                                                 *metermeter.prefetch_lines*
 prefetch_lines ~
     Lines scanned around cursor beyond visible range.
+    Global: `g:metermeter_prefetch_lines`
     Default: `5`
 
                                                 *metermeter.require_trailing_backslash*
 require_trailing_backslash ~
     Only annotate lines ending with `\`.
+    Global: `g:metermeter_require_trailing_backslash` (also supports `b:metermeter_require_trailing_backslash`)
     Default: `false`
 
                                                 *metermeter.ui.stress*
 ui.stress ~
     Enable stress span highlighting.
+    Global: `g:metermeter_ui_stress`
     Default: `true`
 
                                                 *metermeter.ui.meter_hints*
 ui.meter_hints ~
     Show meter label at end of line (optionally with notes like "(fem, inv)";
     see |metermeter.ui.meter_hint_details|).
+    Global: `g:metermeter_ui_meter_hints`
     Default: `true`
 
                                                 *metermeter.ui.meter_hint_abbrev*
 ui.meter_hint_abbrev ~
-    Abbreviate meter names in the end-of-line hint (e.g. "iamb pent").
+    Abbreviate meter names in the end-of-line hint (e.g. "iP", "t4").
+    Global: `g:metermeter_ui_meter_hint_abbrev`
     Default: `true`
 
                                                 *metermeter.ui.meter_hint_details*
@@ -94,6 +102,7 @@ ui.meter_hint_details ~
     Controls how much detail is shown in the end-of-line meter hint.
 
     Values: `"off"` | `"deviations"` | `"always"`
+    Global: `g:metermeter_ui_meter_hint_details`
     - `"off"`: show only the meter name
     - `"deviations"`: show only non-default notes (e.g. feminine endings and
       binary-meter substitutions like inversions/spondees/pyrrhics)
@@ -112,21 +121,25 @@ ui.meter_hint_details ~
                                                 *metermeter.ui.confident_threshold*
 ui.confident_threshold ~
     Confidence >= this uses bright highlight; below uses dim.
+    Global: `g:metermeter_ui_confident_threshold`
     Default: `0.7`
 
                                                 *metermeter.ui.loading_indicator*
 ui.loading_indicator ~
     Show spinner on lines being analyzed.
+    Global: `g:metermeter_ui_loading_indicator`
     Default: `true`
 
                                                 *metermeter.cache.max_entries*
 cache.max_entries ~
     Per-buffer LRU cache capacity.
+    Global: `g:metermeter_cache_max_entries`
     Default: `5000`
 
                                                 *metermeter.debug_dump_path*
 debug_dump_path ~
     Output path for |:MeterMeterDebug|.
+    Global: `g:metermeter_debug_dump_path`
     Default: `"/tmp/metermeter_nvim_dump.json"`
 
 ==============================================================================
