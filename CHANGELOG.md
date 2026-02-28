@@ -19,6 +19,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Luarocks rockspec for rocks.nvim compatibility
 - README badges (CI, Neovim version, license)
 
+### Changed
+- Meter engine: improved binary-meter inversion handling and short-line iambic tie-breaker for more stable classification.
+- Meter engine: expanded verse pronunciation variants (apostrophe spellings, alternate dictionary pronunciations).
+
+### Fixed
+- Meter engine: avoid dropping tokens when the pronunciation layer returns no syllables by using a conservative syllable fallback.
+
 ## [0.1.0] - 2026-02-26
 
 Initial release.

@@ -48,7 +48,9 @@ line text
 
 Meter classification is syllable-count constrained. For example, `iambic pentameter` is only considered for 10–11 syllables (never 9). The Viterbi decoder keeps length mismatch tightly controlled: it allows an extra trailing unstressed syllable for iambic feminine endings, and (for iambic meters tetrameter and longer) a single extra unstressed syllable directly before a strong slot (anapestic substitution), rather than arbitrary insert/delete anywhere in the line.
 
-Because syllabifiers disagree with poetic practice in a few common cases, MeterMeter also considers a small set of plausible verse pronunciation variants (penalized and limited) when the raw syllable count would otherwise exclude a meter class (e.g. contractions like `heaven` → `heav'n`, or `-ed` being realized as an extra syllable in archaic diction).
+Binary meters treat initial inversion (trochaic substitution in iambic) as a permitted variant with a small penalty rather than requiring a double mismatch in the first foot. In close calls, MeterMeter also slightly prefers iambic analyses as a tie-breaker (reflecting typical English verse priors).
+
+Because syllabifiers disagree with poetic practice in a few common cases, MeterMeter also considers a small set of plausible verse pronunciation variants (penalized and limited) when the raw syllable count would otherwise exclude a meter class (e.g. contractions like `heaven` → `heav'n`, `-ed` being realized as an extra syllable in archaic diction, or alternate dictionary pronunciations that change syllable count/stress).
 
 MeterMeter does not currently attempt full scholarly scansion markup (e.g. explicit substitution labels, caesura, synalepha/elision taxonomy, or poem-level global parsing).
 
@@ -61,7 +63,7 @@ The only widely-used English gold standard is [For Better For Verse](https://git
 | Scandroid (Hartman) | Dict + rules → stress → feet | ~90% | -- |
 | ZeuScansion (Agirrezabal 2016) | Dict + POS + Groves rules → stress → template | 86.78% | -- |
 | BiLSTM-CRF (Agirrezabal 2017) | Neural sequence labeling | 92.96% | 61.39% |
-| **MeterMeter** | **Dict + function-word priors + meter-aware Viterbi** | **~86%** | **~79%** |
+| **MeterMeter** | **Dict + function-word priors + meter-aware Viterbi** | **~87%** | **~81%** |
 
 Per-syllable agreement is naturally high because most syllables are lexically stable. Meter-class accuracy is stricter than token-level agreement but is still a different metric from exact whole-line stress-string match.
 The current MeterMeter values above come from `benchmarks/run_benchmark.py` on the full local 4B4V corpus (1,181 lines) as measured on February 28, 2026.
@@ -78,7 +80,7 @@ The current MeterMeter values above come from `benchmarks/run_benchmark.py` on t
 
 Every system that scores well on per-syllable accuracy uses the same fundamental approach: **stress first, meter second**. Dictionary lookup determines stress for polysyllabic words, monosyllable handling is the hard part, and meter is classified from the resulting pattern. The BiLSTM-CRF learns these mappings jointly from data instead of using hand-crafted rules.
 
-MeterMeter previously used prosodic's OT metrical parser, which works in the opposite direction: it picks the best *metrical grid* for the line and reads stress off the grid positions. This was linguistically principled but fragile -- when the parser picked the wrong template (e.g. trochaic instead of iambic), every syllable flipped, producing ~66% per-syllable accuracy. Switching to lexical stress lookup with monosyllable rules brought per-syllable accuracy to ~85% and made the engine ~80x faster (the OT parse was the bottleneck).
+MeterMeter previously used prosodic's OT metrical parser, which works in the opposite direction: it picks the best *metrical grid* for the line and reads stress off the grid positions. This was linguistically principled but fragile -- when the parser picked the wrong template (e.g. trochaic instead of iambic), every syllable flipped, producing ~66% per-syllable accuracy. Switching to lexical stress lookup with monosyllable rules brought per-syllable accuracy into the mid/high 80s and made the engine ~80x faster (the OT parse was the bottleneck).
 
 The remaining gap to high-performing learned systems is mostly context-dependent monosyllable stress: function words in strong metrical positions (e.g. "to" in "thee TO a summer's day") and local ambiguity that needs line context and weak poem-level priors.
 

@@ -21,6 +21,17 @@ local RESTART_WINDOW_S = 60
 local MAX_STDOUT_BYTES = 512 * 1024
 local MAX_STDERR_BYTES = 16 * 1024
 
+local function _spawn_env()
+  local env = uv.os_environ()
+  env.PYTHONHASHSEED = env.PYTHONHASHSEED or "0"
+  local out = {}
+  for k, v in pairs(env) do
+    out[#out + 1] = tostring(k) .. "=" .. tostring(v)
+  end
+  table.sort(out)
+  return out
+end
+
 local function _cap_tail(buf, max_bytes)
   if not buf or buf == "" then
     return ""
@@ -150,6 +161,7 @@ function M.ensure_running(cmd)
   local handle, err = uv.spawn(cmd[1], {
     args = { unpack(cmd, 2) },
     stdio = { stdin_pipe, stdout_pipe, stderr_pipe },
+    env = _spawn_env(),
   }, function(code, signal)
     vim.schedule(function()
       _on_exit(code, signal)

@@ -32,11 +32,16 @@ also allow a single extra unstressed syllable directly before a strong slot
 (anapestic substitution). MeterMeter does not arbitrarily insert/delete in the
 middle of the line to force-fit a template.
 
+Binary meters treat initial inversion (trochaic substitution in iambic) as a
+permitted variant with a small penalty rather than requiring a double mismatch
+in the first foot. In close calls, MeterMeter also slightly prefers iambic
+analyses as a tie-breaker.
+
 Because syllabifiers disagree with poetic practice in a few common cases,
 MeterMeter also considers a small set of plausible verse pronunciation
 variants (penalized and limited) when the raw syllable count would otherwise
 exclude a meter class (e.g. heav'n-style contractions, or archaic -ed being
-realized as an extra syllable).
+realized as an extra syllable, or alternate dictionary pronunciations).
 
 ==============================================================================
 REQUIREMENTS                                            *metermeter-requirements*

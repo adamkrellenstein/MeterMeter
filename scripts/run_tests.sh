@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+export PYTHONHASHSEED="${PYTHONHASHSEED:-0}"
+
 PYTHON="${ROOT}/.venv/bin/python3"
 if [[ ! -x "${PYTHON}" ]]; then
   PYTHON="python3"

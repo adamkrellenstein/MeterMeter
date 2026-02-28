@@ -105,6 +105,8 @@ TERNARY_METER_PENALTY = 0.14
 IAMBIC_BIAS_THRESHOLD = 0.10
 IAMBIC_HEXAMETER_BONUS = 0.12
 IAMBIC_ANAPESTIC_SUB_COST = 0.55
+IAMBIC_ANACRUSIS_COST = 0.60
+IAMBIC_INITIAL_INVERSION_COST = 0.22
 IAMBIC_FIRST_FOOT_PENALTY = 0.16
 IAMBIC_SPONDEE_PENALTY = 0.34
 IAMBIC_WEAK_STRONG_PENALTY = 0.58
@@ -128,6 +130,7 @@ CONTEXT_PRIOR_MAX_BONUS = 0.12
 # syllabification variants.
 VERSE_VARIANT_MAX_OPS = 2
 VERSE_VARIANT_OP_PENALTY = 0.04
+VERSE_PRON_VARIANT_OP_PENALTY = 0.03
 
 # High-precision list of common disyllables/trisyllables that are frequently
 # contracted by 1 syllable in verse (e.g. heav'n, o'er, pow'r).
@@ -203,12 +206,14 @@ class _TokenSyllables:
     token_start: int
     token_end: int
     units: List[_SyllableUnit]
+    alt_units: List[List[_SyllableUnit]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class _VerseVariantOp:
     token_pos: int
     kind: str  # "merge_last_two" | "split_ed"
+    arg: int = 0
 
 
 class MeterEngine:
@@ -217,6 +222,94 @@ class MeterEngine:
 
     def tokenize(self, line: str) -> List[str]:
         return TOKEN_RE.findall(line)
+
+    def _estimate_syllables_fallback(self, word: str) -> int:
+        w = re.sub(r"[^a-z]", "", (word or "").lower())
+        if not w:
+            return 1
+        if len(w) <= 3:
+            return 1
+        vowel_groups = re.findall(r"[aeiouy]+", w)
+        count = len(vowel_groups)
+        if w.endswith("e") and not w.endswith(("le", "ye")) and count > 1:
+            count -= 1
+        if w.endswith("le") and len(w) > 2 and w[-3] not in "aeiouy":
+            count += 1
+        return max(1, int(count))
+
+    def _fallback_units_for_token(
+        self,
+        line: str,
+        token_text: str,
+        word_text: str,
+        token_index: int,
+        token_start: int,
+        token_end: int,
+    ) -> List[_SyllableUnit]:
+        token = (token_text or "").strip()
+        token_lower = token.lower()
+        if not token_lower:
+            return []
+        n = self._estimate_syllables_fallback(word_text or token_lower)
+        n = max(1, min(n, len(token_lower)))
+        base = len(token_lower) // n
+        rem = len(token_lower) % n
+        parts: List[str] = []
+        cursor = 0
+        for i in range(n):
+            size = base + (1 if i < rem else 0)
+            if size <= 0:
+                break
+            parts.append(token_lower[cursor : cursor + size])
+            cursor += size
+        if not parts:
+            parts = [token_lower]
+        spans = self._align_syllables_in_token(line, token_start, token_end, parts)
+        options = self._options_for_syllable(word_text, is_monosyllable=(len(parts) == 1), lexical_stressed=False)
+        default_stress = min(options, key=lambda option: (option[1], option[0]))[0]
+
+        out: List[_SyllableUnit] = []
+        for syl_text, (span_start, span_end) in zip(parts, spans):
+            out.append(_SyllableUnit(
+                text=syl_text,
+                token_index=token_index,
+                char_start=span_start,
+                char_end=span_end,
+                options=options,
+                default_stress=default_stress,
+            ))
+        return out
+
+    def _units_from_prosodic_syllables(
+        self,
+        line: str,
+        word_text: str,
+        token_index: int,
+        token_start: int,
+        token_end: int,
+        syls: List[Any],
+        line_char_len: int,
+    ) -> Tuple[List[_SyllableUnit], str]:
+        is_mono = len(syls) == 1
+        syllable_texts = [str(getattr(syl, "txt", "") or "").lower() for syl in syls]
+        syllable_spans = self._align_syllables_in_token(line, token_start, token_end, syllable_texts)
+
+        token_pattern_default = ""
+        token_units: List[_SyllableUnit] = []
+        for syl, syl_text, (span_start, span_end) in zip(syls, syllable_texts, syllable_spans):
+            lexical_stressed = bool(getattr(syl, "is_stressed", False))
+            options = self._options_for_syllable(word_text, is_mono, lexical_stressed)
+            default_stress = min(options, key=lambda option: (option[1], option[0]))[0]
+            token_pattern_default += default_stress
+            token_units.append(_SyllableUnit(
+                text=syl_text,
+                token_index=token_index,
+                char_start=max(0, min(line_char_len, span_start)),
+                char_end=max(0, min(line_char_len, span_end)),
+                options=options,
+                default_stress=default_stress,
+            ))
+        return token_units, token_pattern_default
 
     def meter_features_for(self, meter_name: str, stress_pattern: str) -> Dict[str, Any]:
         """Compute lightweight scansion notes from (meter_name, stress_pattern).
@@ -311,14 +404,13 @@ class MeterEngine:
         allowed = sorted({base_len + delta for delta in deltas if (base_len + delta) > 0})
         return tuple(allowed)
 
-    def _foot_position_penalty(self, pattern: str, foot_name: str, feet: int) -> float:
+    def _foot_position_penalty(self, pattern: str, foot_name: str, template: str) -> float:
         if not pattern or foot_name not in {"iambic", "trochaic"}:
             return 0.0
-        unit = FOOT_TEMPLATES[foot_name]
         out = 0.0
-        n = min(len(pattern), len(unit) * feet)
+        n = min(len(pattern), len(template))
         for i in range(n):
-            expected = unit[i % 2]
+            expected = template[i]
             got = pattern[i]
             if got == expected:
                 continue
@@ -345,7 +437,13 @@ class MeterEngine:
             return 0.0
         template = self._template_for_meter(foot_name, feet)
         dist = self._pattern_distance(pattern, template, foot_name)
-        dist += self._foot_position_penalty(pattern, foot_name, feet)
+        dist += self._foot_position_penalty(pattern, foot_name, template)
+        if foot_name == "iambic" and feet >= 2 and len(template) >= 2:
+            inversion = "SU" + ("US" * (feet - 1))
+            inv_dist = self._pattern_distance(pattern, inversion, foot_name)
+            inv_dist += self._foot_position_penalty(pattern, foot_name, inversion)
+            inv_dist += IAMBIC_INITIAL_INVERSION_COST
+            dist = min(dist, inv_dist)
         normalizer = max(len(pattern), len(template), 1)
         score = max(0.0, 1.0 - (dist / normalizer))
         score = self._apply_meter_length_priors(score, foot_name, feet, len(pattern))
@@ -409,7 +507,13 @@ class MeterEngine:
         best_name, best_feet, best_score = rescored[0]
         iambic_bias = False
         iambic_bias_target = None
-        if 10 <= len(pattern) <= 11:
+        if 4 <= len(pattern) <= 5:
+            iambic_bias_target = 2
+        elif 6 <= len(pattern) <= 7:
+            iambic_bias_target = 3
+        elif 8 <= len(pattern) <= 9:
+            iambic_bias_target = 4
+        elif 10 <= len(pattern) <= 11:
             iambic_bias_target = 5
         elif 12 <= len(pattern) <= 13:
             iambic_bias_target = 6
@@ -495,8 +599,13 @@ class MeterEngine:
                 out.append((foot_name, feet))
         return out
 
-    def _viterbi_for_meter(self, syllables: List[_SyllableUnit], foot_name: str, feet: int) -> Tuple[str, float]:
-        template = self._template_for_meter(foot_name, feet)
+    def _viterbi_for_template(
+        self,
+        syllables: List[_SyllableUnit],
+        foot_name: str,
+        feet: int,
+        template: str,
+    ) -> Tuple[str, float]:
         n = len(syllables)
         m = len(template)
         len_diff = n - m
@@ -542,7 +651,7 @@ class MeterEngine:
                         dp[i + 1][j] = new_cost
                         prev[i + 1][j] = (i, j, "D", delete_stress)
 
-                if allow_delete and foot_name == "iambic" and feet >= 4 and i < n and j < m and template[j] == "S":
+                if allow_delete and foot_name == "iambic" and feet >= 4 and i < n and 0 < j < m and template[j] == "S":
                     # Allow a single extra weak syllable before a strong slot
                     # (anapestic substitution) in iambic meters.
                     unit = syllables[i]
@@ -550,6 +659,17 @@ class MeterEngine:
                     delete_stress = "U"
                     delete_opt_cost = float(option_costs.get("U", 0.0))
                     new_cost = cur + delete_opt_cost + IAMBIC_ANAPESTIC_SUB_COST
+                    if new_cost < dp[i + 1][j]:
+                        dp[i + 1][j] = new_cost
+                        prev[i + 1][j] = (i, j, "D", delete_stress)
+
+                if allow_delete and foot_name == "iambic" and feet >= 5 and i < n and j == 0:
+                    # Allow a single extra leading weak syllable (anacrusis/pickup).
+                    unit = syllables[i]
+                    option_costs = dict(unit.options)
+                    delete_stress = "U"
+                    delete_opt_cost = float(option_costs.get("U", 0.0))
+                    new_cost = cur + delete_opt_cost + IAMBIC_ANACRUSIS_COST
                     if new_cost < dp[i + 1][j]:
                         dp[i + 1][j] = new_cost
                         prev[i + 1][j] = (i, j, "D", delete_stress)
@@ -587,6 +707,19 @@ class MeterEngine:
             pattern = "".join(unit.default_stress for unit in syllables)
 
         return pattern, final_cost
+
+    def _viterbi_for_meter(self, syllables: List[_SyllableUnit], foot_name: str, feet: int) -> Tuple[str, float]:
+        template = self._template_for_meter(foot_name, feet)
+        best_pattern, best_cost = self._viterbi_for_template(syllables, foot_name, feet, template)
+
+        if foot_name == "iambic" and feet >= 2 and len(template) >= 2:
+            inversion = "SU" + ("US" * (feet - 1))
+            inv_pattern, inv_cost = self._viterbi_for_template(syllables, foot_name, feet, inversion)
+            inv_cost += IAMBIC_INITIAL_INVERSION_COST
+            if inv_cost < best_cost:
+                best_pattern, best_cost = inv_pattern, inv_cost
+
+        return best_pattern, best_cost
 
     def _best_meter_for_ambiguous_syllables(
         self,
@@ -635,7 +768,13 @@ class MeterEngine:
 
         iambic_bias = False
         iambic_bias_target = None
-        if 10 <= n_syllables <= 11:
+        if 4 <= n_syllables <= 5:
+            iambic_bias_target = 2
+        elif 6 <= n_syllables <= 7:
+            iambic_bias_target = 3
+        elif 8 <= n_syllables <= 9:
+            iambic_bias_target = 4
+        elif 10 <= n_syllables <= 11:
             iambic_bias_target = 5
         elif 12 <= n_syllables <= 13:
             iambic_bias_target = 6
@@ -720,8 +859,19 @@ class MeterEngine:
     def _token_allows_verse_compression(self, word_text: str, syllable_count: int) -> bool:
         if syllable_count < 2:
             return False
-        key = (word_text or "").strip().lower().replace("’", "'").replace("'", "")
-        return key in VERSE_COMPRESS_WORDS
+        normalized = (word_text or "").strip().lower().replace("’", "'")
+        key = normalized.replace("'", "")
+        if key in VERSE_COMPRESS_WORDS:
+            return True
+        if key.endswith("s") and key[:-1] in VERSE_COMPRESS_WORDS:
+            return True
+        if "'" in normalized and not normalized.endswith("'s"):
+            # Many poetic spellings use an apostrophe to mark a contracted vowel
+            # (heav'n, o'er, ne'er, flow'rs, learn'd).
+            suffix = normalized.split("'", 1)[1]
+            if 0 < len(suffix) <= 3:
+                return True
+        return False
 
     def _token_allows_ed_expansion(self, word_text: str, syllable_count: int) -> bool:
         if syllable_count != 1:
@@ -820,6 +970,7 @@ class MeterEngine:
         chosen_units = base_units
         chosen_ops: Tuple[_VerseVariantOp, ...] = ()
         best_adjusted = best_score
+        base_margin = float(debug_scores.get("margin") or 0.0)
 
         n_syllables = len(base_units)
         ops: List[_VerseVariantOp] = []
@@ -827,10 +978,23 @@ class MeterEngine:
             for pos, info in enumerate(token_infos):
                 if self._token_allows_verse_compression(info.word_text, len(info.units)):
                     ops.append(_VerseVariantOp(token_pos=pos, kind="merge_last_two"))
+                for alt_idx, alt in enumerate(info.alt_units):
+                    if len(alt) < len(info.units):
+                        ops.append(_VerseVariantOp(token_pos=pos, kind="pron_form", arg=alt_idx))
         elif n_syllables <= 9:
             for pos, info in enumerate(token_infos):
                 if self._token_allows_ed_expansion(info.word_text, len(info.units)):
                     ops.append(_VerseVariantOp(token_pos=pos, kind="split_ed"))
+                for alt_idx, alt in enumerate(info.alt_units):
+                    if len(alt) > len(info.units):
+                        ops.append(_VerseVariantOp(token_pos=pos, kind="pron_form", arg=alt_idx))
+        elif base_margin <= 0.03:
+            # If the line is a close call, allow alternate lexical stress patterns
+            # with a small penalty, but do not change the syllable count.
+            for pos, info in enumerate(token_infos):
+                for alt_idx, alt in enumerate(info.alt_units):
+                    if len(alt) == len(info.units):
+                        ops.append(_VerseVariantOp(token_pos=pos, kind="pron_form", arg=alt_idx))
 
         if not ops:
             debug_scores = dict(debug_scores)
@@ -838,6 +1002,7 @@ class MeterEngine:
             return meter_name, best_score, debug_scores, resolved_pattern, chosen_units
 
         # Cap per-line variant search.
+        ops.sort(key=lambda op: (op.token_pos, op.kind, op.arg))
         ops = ops[:10]
 
         base_by_token = [info.units for info in token_infos]
@@ -849,7 +1014,10 @@ class MeterEngine:
                     continue
                 info = token_infos[op.token_pos]
                 cur = by_token[op.token_pos]
-                if op.kind == "merge_last_two":
+                if op.kind == "pron_form":
+                    if 0 <= op.arg < len(info.alt_units):
+                        by_token[op.token_pos] = info.alt_units[op.arg]
+                elif op.kind == "merge_last_two":
                     by_token[op.token_pos] = self._merge_last_two_syllables(info.word_text, cur)
                 elif op.kind == "split_ed":
                     by_token[op.token_pos] = self._split_trailing_ed(line, info.word_text, info.token_start, info.token_end, cur)
@@ -875,7 +1043,9 @@ class MeterEngine:
             if not units:
                 continue
             m, score, dbg, pat = self._best_meter_for_ambiguous_syllables(units, context=context)
-            penalty = VERSE_VARIANT_OP_PENALTY * float(len(op_list))
+            penalty = 0.0
+            for op in op_list:
+                penalty += VERSE_PRON_VARIANT_OP_PENALTY if op.kind == "pron_form" else VERSE_VARIANT_OP_PENALTY
             adjusted = score - penalty
             if adjusted > best_adjusted + 1e-9:
                 meter_name, best_score, debug_scores, resolved_pattern = m, score, dbg, pat
@@ -934,10 +1104,6 @@ class MeterEngine:
             wtype = wt.wordtype
             if getattr(wtype, "is_punc", False):
                 continue
-            wf = wtype.form  # first (least-stressed) pronunciation variant
-            syls = getattr(wf, "syllables", None)
-            if not syls:
-                continue
 
             token_index = min(token_cursor, max(0, len(tokens) - 1))
             if token_cursor < len(token_spans):
@@ -958,34 +1124,95 @@ class MeterEngine:
                 token_text = line[token_start:token_end]
 
             word_text = token_text.strip().lower().replace("’", "'").strip("'")
-            is_mono = len(syls) == 1
-            syllable_texts = [str(getattr(syl, "txt", "") or "").lower() for syl in syls]
-            syllable_spans = self._align_syllables_in_token(line, token_start, token_end, syllable_texts)
 
-            token_pattern_default = ""
-            token_units: List[_SyllableUnit] = []
-            for syl, syl_text, (span_start, span_end) in zip(syls, syllable_texts, syllable_spans):
-                lexical_stressed = bool(getattr(syl, "is_stressed", False))
-                options = self._options_for_syllable(word_text, is_mono, lexical_stressed)
-                default_stress = min(options, key=lambda option: (option[1], option[0]))[0]
-                token_pattern_default += default_stress
-                unit = _SyllableUnit(
-                    text=syl_text,
-                    token_index=token_index,
-                    char_start=max(0, min(line_char_len, span_start)),
-                    char_end=max(0, min(line_char_len, span_end)),
-                    options=options,
-                    default_stress=default_stress,
+            wf = wtype.form  # first (least-stressed) pronunciation variant
+            syls = getattr(wf, "syllables", None) if wf is not None else None
+            if not syls:
+                token_units = self._fallback_units_for_token(
+                    line,
+                    token_text,
+                    word_text,
+                    token_index,
+                    token_start,
+                    token_end,
                 )
-                token_units.append(unit)
+                if not token_units:
+                    continue
+                token_patterns.append("".join(unit.default_stress for unit in token_units) or "U")
+                token_infos.append(_TokenSyllables(
+                    word_text=word_text,
+                    token_index=token_index,
+                    token_start=token_start,
+                    token_end=token_end,
+                    units=token_units,
+                ))
+                syllables.extend(token_units)
+                continue
+
+            token_units, token_pattern_default = self._units_from_prosodic_syllables(
+                line,
+                word_text,
+                token_index,
+                token_start,
+                token_end,
+                list(syls),
+                line_char_len,
+            )
+            if not token_units:
+                continue
+            for unit in token_units:
                 syllables.append(unit)
             token_patterns.append(token_pattern_default or "U")
+
+            alt_units: List[List[_SyllableUnit]] = []
+            forms = list(getattr(wtype, "forms", None) or [])
+            if len(forms) > 1:
+                base_sig = (len(token_units), token_pattern_default)
+                by_sig: Dict[Tuple[int, str], List[_SyllableUnit]] = {}
+                for form in forms[1:]:
+                    alt_syls = getattr(form, "syllables", None)
+                    if not alt_syls:
+                        continue
+                    a_units, a_pat = self._units_from_prosodic_syllables(
+                        line,
+                        word_text,
+                        token_index,
+                        token_start,
+                        token_end,
+                        list(alt_syls),
+                        line_char_len,
+                    )
+                    if not a_units:
+                        continue
+                    sig = (len(a_units), a_pat)
+                    if sig == base_sig or sig in by_sig:
+                        continue
+                    by_sig[sig] = a_units
+
+                if by_sig:
+                    base_len = len(token_units)
+                    count_change = [(sig, units) for sig, units in by_sig.items() if sig[0] != base_len]
+                    same_len = [(sig, units) for sig, units in by_sig.items() if sig[0] == base_len]
+                    count_change.sort(key=lambda item: (abs(item[0][0] - base_len), item[0][0], item[0][1]))
+                    same_len.sort(key=lambda item: (item[0][1],))
+
+                    selected: List[List[_SyllableUnit]] = []
+                    pools = [count_change, same_len]
+                    pool_idx = 0
+                    while len(selected) < 3 and any(pools):
+                        pool = pools[pool_idx % len(pools)]
+                        if pool:
+                            selected.append(pool.pop(0)[1])
+                        pool_idx += 1
+                        pools = [p for p in pools if p]
+                    alt_units = selected
             token_infos.append(_TokenSyllables(
                 word_text=word_text,
                 token_index=token_index,
                 token_start=token_start,
                 token_end=token_end,
                 units=token_units,
+                alt_units=alt_units,
             ))
 
         if not syllables:
